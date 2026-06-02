@@ -1,0 +1,18 @@
+{
+  "_nota": "STUB de ejemplo. Reemplazar con datos en vivo del bridge de NinjaTrader 8.",
+  "par": "NQ",
+  "timestamp": "2026-06-02T09:35:00-04:00",
+  "sesion": "NY (apertura)",
+  "precio_actual": 19250.50,
+  "timeframes": {
+    "1h": {"tendencia": "alcista", "ultimo_swing_high": 19310.0, "ultimo_swing_low": 19120.0},
+    "15m": {"tendencia": "alcista", "rango_apertura": {"high": 19268.0, "low": 19230.0}},
+    "5m": {"estructura": "pullback en curso", "ema20": 19242.0},
+    "1m": {"nota": "velas crudas; los agentes que necesiten otros TF resamplean"}
+  },
+  "niveles_clave": {
+    "pdh": 19300.0,
+    "pdl": 19105.0,
+    "vwap_sesion": 19238.0
+  }
+}

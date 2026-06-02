@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradingAgents — Jefe IA</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:#0d1117; color:#e6edf3; }
+  header { padding:20px 24px; border-bottom:1px solid #21262d; }
+  header h1 { margin:0; font-size:20px; } header p { margin:4px 0 0; color:#8b949e; font-size:13px; }
+  .wrap { max-width:980px; margin:0 auto; padding:24px; }
+  .panel { background:#161b22; border:1px solid #21262d; border-radius:12px; padding:18px; margin-bottom:18px; }
+  label { display:block; font-size:13px; color:#8b949e; margin:10px 0 4px; }
+  input, select { width:100%; padding:10px 12px; background:#0d1117; border:1px solid #30363d; border-radius:8px; color:#e6edf3; font-size:14px; }
+  .row { display:flex; gap:14px; flex-wrap:wrap; } .row > div { flex:1; min-width:160px; }
+  button { margin-top:16px; width:100%; padding:13px; background:#238636; border:none; border-radius:8px; color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
+  button:disabled { background:#30363d; cursor:not-allowed; }
+  .hint { font-size:12px; color:#6e7681; margin-top:6px; }
+  .veredicto { text-align:center; padding:20px; border-radius:12px; margin-bottom:16px; }
+  .veredicto h2 { margin:0 0 6px; font-size:28px; } .veredicto .dir { font-size:16px; opacity:.9; }
+  .ALTA { background:#0f5132; } .MEDIA { background:#664d03; } .BAJA,.SIN-SETUP,.ESPERAR { background:#3a2d2d; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:10px; }
+  .card { background:#0d1117; border:1px solid #21262d; border-radius:10px; padding:12px; font-size:13px; }
+  .card .t { font-weight:600; margin-bottom:6px; } .card .v { font-weight:700; }
+  .LONG { color:#3fb950; } .SHORT { color:#f85149; } .NO-TRADE { color:#8b949e; }
+  .meta { font-size:12px; color:#8b949e; } .kv { margin:3px 0; }
+  pre { background:#0d1117; border:1px solid #21262d; border-radius:8px; padding:12px; overflow:auto; font-size:12px; color:#8b949e; }
+  .err { background:#3a2020; border:1px solid #6e2b2b; color:#ff9a9a; padding:12px; border-radius:8px; }
+  .spin { display:none; text-align:center; color:#8b949e; padding:20px; }
+  .disc { font-size:11px; color:#6e7681; margin-top:14px; line-height:1.5; }
+  .exec { margin-top:14px; border-top:1px solid #21262d; padding-top:12px; }
+  .razon { font-size:11px; color:#6e7681; margin-top:6px; line-height:1.4; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🤖 TradingAgents — Jefe IA</h1>
+  <p>Equipo de 6 traders + noticias. Tú eliges el modelo, ves qué dijo cada uno y ejecutas a NinjaTrader.</p>
+</header>
+
+<div class="wrap">
+  <div class="panel">
+    <div class="row">
+      <div>
+        <label>Proveedor de IA</label>
+        <select id="provider" onchange="poblarModelos()">
+          <option value="gemini">Google Gemini (gratis)</option>
+          <option value="groq">Groq (gratis)</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Claude / Anthropic</option>
+          <option value="openrouter">OpenRouter (Qwen, etc.)</option>
+        </select>
+      </div>
+      <div>
+        <label>Par a analizar</label>
+        <select id="par">
+          <option value="MNQ">MNQ — Micro Nasdaq 100</option>
+          <option value="MES">MES — Micro S&P 500</option>
+          <option value="MGC">MGC — Micro Oro</option>
+          <option value="NQ">NQ — Mini Nasdaq 100</option>
+          <option value="ES">ES — Mini S&P 500</option>
+          <option value="GC">GC — Oro (futuros)</option>
+          <option value="XAUUSD">XAUUSD — Oro spot</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Modelo de los traders <span class="hint">(los 6 + noticias)</span></label>
+        <select id="model_team"></select>
+      </div>
+      <div>
+        <label>Modelo del Jefe IA <span class="hint">(decisión final)</span></label>
+        <select id="model_jefe"></select>
+      </div>
+    </div>
+    <label>Tu API key <span class="hint">(se usa solo para esta consulta, no se guarda)</span></label>
+    <input id="apikey" type="password" placeholder="pega aquí tu key">
+    <button id="btn" onclick="analizar()">Analizar</button>
+    <div class="hint" id="getkey">Gemini gratis: aistudio.google.com/apikey · Groq gratis: console.groq.com/keys</div>
+  </div>
+
+  <div class="spin" id="spin">⏳ Consultando a los 6 traders + noticias + Jefe IA… (puede tardar ~20-40s)</div>
+  <div id="out"></div>
+
+  <div class="disc">⚠️ Análisis asistido por IA, con fines educativos. No es asesoría financiera. Datos de mercado EN VIVO desde
+  NinjaTrader. <b>La ejecución de órdenes es REAL si la cuenta no es Sim101</b> — prueba siempre primero en Sim101.
+  El trading conlleva riesgo de pérdida.</div>
+</div>
+
+<script>
+const MODEL_MAP = {
+  gemini: ['gemini/gemini-2.5-flash', 'gemini/gemini-2.5-pro', 'gemini/gemini-2.0-flash', 'gemini/gemini-2.5-flash-lite'],
+  groq: ['groq/llama-3.3-70b-versatile', 'groq/llama-3.1-8b-instant'],
+  openai: ['gpt-4o-mini', 'gpt-4o'],
+  anthropic: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-8'],
+  openrouter: ['openrouter/qwen/qwen-2.5-72b-instruct', 'openrouter/anthropic/claude-sonnet-4.5'],
+};
+
+function poblarModelos() {
+  const prov = document.getElementById('provider').value;
+  const models = MODEL_MAP[prov] || [];
+  ['model_team', 'model_jefe'].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '';
+    models.forEach(m => {
+      const o = document.createElement('option');
+      o.value = m; o.textContent = m.split('/').pop();
+      sel.appendChild(o);
+    });
+  });
+}
+
+async function analizar() {
+  const btn = document.getElementById('btn');
+  const out = document.getElementById('out');
+  const spin = document.getElementById('spin');
+  const body = {
+    par: document.getElementById('par').value,
+    provider: document.getElementById('provider').value,
+    api_key: document.getElementById('apikey').value,
+    model_team: document.getElementById('model_team').value,
+    model_jefe: document.getElementById('model_jefe').value,
+  };
+  if (!body.api_key.trim()) { out.innerHTML = '<div class="err">Primero pega tu API key.</div>'; return; }
+  out.innerHTML = ''; spin.style.display = 'block'; btn.disabled = true;
+  try {
+    const r = await fetch('/analizar', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await r.json();
+    spin.style.display = 'none'; btn.disabled = false;
+    if (data.error) { out.innerHTML = '<div class="err">❌ ' + data.error + '</div>'; return; }
+    render(data);
+  } catch (e) {
+    spin.style.display = 'none'; btn.disabled = false;
+    out.innerHTML = '<div class="err">Error de conexión: ' + e + '</div>';
+  }
+}
+
+function render(d) {
+  window._jefe = d.jefe || {};
+  window._par = d.par;
+  const j = window._jefe;
+  const conv = (j['convicción'] || j.conviccion || 'SIN-SETUP');
+  const dir = (j.direccion || '').toUpperCase();
+
+  let exec = '';
+  if (dir === 'LONG' || dir === 'SHORT') {
+    exec = `<div class="exec">
+      <div class="row">
+        <div><label>Cuenta NinjaTrader</label>
+          <select id="acct">
+            <option value="Sim101">Sim101 (simulada — recomendada)</option>
+            <option value="LFE05079311240001">LFE05079311240001 (real/eval)</option>
+          </select></div>
+        <div><label>Cantidad (micros)</label><input id="qty" type="number" value="1" min="1"></div>
+      </div>
+      <button style="background:${dir === 'LONG' ? '#1f6feb' : '#da3633'}" onclick="ejecutarOrden('${dir}')">⚡ Ejecutar ${dir} en NinjaTrader</button>
+      <div class="hint">Manda orden de mercado ${dir} con SL ${j.sl ?? '—'} / TP ${j.tp ?? '—'}. Te pedirá confirmación.</div>
+    </div>`;
+  }
+
+  let html = `<div class="panel"><div class="veredicto ${conv}">
+    <h2>${conv}</h2>
+    <div class="dir">${j.direccion || ''} ${j.zona_entrada ? '· entrada ' + j.zona_entrada : ''}</div>
+    <div class="meta" style="margin-top:8px">SL: ${j.sl ?? '—'} · TP: ${j.tp ?? '—'} · R:R ${j.rr ?? '—'} · riesgo sugerido ${j.riesgo_sugerido_pct ?? '—'}%</div>
+  </div>
+  <div class="kv">${j.resumen || ''}</div>
+  <div class="meta kv">📰 ${j.filtro_noticias || ''}</div>${exec}</div>`;
+
+  html += `<div class="panel"><div class="meta" style="margin-bottom:10px">Veredictos de los traders (${d.par} · ${d.pool}) · modelos: ${d.modelos ? d.modelos.equipo + ' / ' + d.modelos.jefe : ''}</div><div class="grid">`;
+  (d.veredictos || []).forEach(v => {
+    const ver = v.veredicto || (v.error ? 'ERROR' : '—');
+    html += `<div class="card"><div class="t">${v.trader || '?'}</div>
+      <div class="v ${ver}">${ver}</div>
+      <div class="meta kv">entrada ${v.entrada ?? '—'} (${v.tipo_orden ?? '—'})</div>
+      <div class="meta kv">SL ${v.sl ?? '—'} · TP ${v.tp ?? '—'}</div>
+      <div class="meta kv">conf. ${v.confianza ?? '—'}/10</div>
+      <div class="razon">${(v.razon || '').slice(0, 240)}</div></div>`;
+  });
+  html += `</div></div>`;
+
+  const n = d.noticias || {};
+  html += `<div class="panel"><div class="meta" style="margin-bottom:8px">Noticias — sesgo: <b>${n.sesgo_neto || '—'}</b></div>
+    <div class="kv meta">${n.regimen || ''}</div>
+    <details style="margin-top:10px"><summary class="meta" style="cursor:pointer">Ver JSON completo</summary>
+    <pre>${JSON.stringify(d, null, 2)}</pre></details></div>`;
+
+  document.getElementById('out').innerHTML = html;
+}
+
+async function ejecutarOrden(dir) {
+  const j = window._jefe || {};
+  const acct = document.getElementById('acct').value;
+  const qty = parseInt(document.getElementById('qty').value || '1', 10);
+  const aviso = acct === 'Sim101' ? '(cuenta simulada)' : '⚠️ CUENTA REAL/EVALUACIÓN — dinero de verdad';
+  if (!confirm(`¿Enviar ${dir} ${qty} ${window._par} a ${acct} ${aviso}?\nSL ${j.sl ?? '—'} / TP ${j.tp ?? '—'}`)) return;
+  try {
+    const r = await fetch('/ejecutar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ par: window._par, direccion: dir, qty, sl: j.sl, tp: j.tp, cuenta: acct }),
+    });
+    const res = await r.json();
+    alert(res.error ? ('Error: ' + res.error) : ('✅ ' + (res.mensaje || 'Orden enviada a NinjaTrader. Revisa la plataforma.')));
+  } catch (e) { alert('Error de conexión: ' + e); }
+}
+
+poblarModelos();
+</script>
+</body>
+</html>

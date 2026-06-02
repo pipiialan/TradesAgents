@@ -1,0 +1,16 @@
+# Entornos y caché de Python
+.venv/
+__pycache__/
+*.pyc
+
+# Secretos — NUNCA subir
+.env
+
+# Datos en vivo / transitorios (no van al repo)
+data/news_cache.json
+data/live_*.json
+data/order_request.json
+data/order_status.json
+
+# NinjaTrader compilados / temporales
+*.user

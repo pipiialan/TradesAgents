@@ -9,6 +9,40 @@ la orden** (no se ejecuta sola).
 Qwen, MiniMax, OpenRouter, local) vía [LiteLLM]. El usuario solo pega su API key en `.env` y elige
 el modelo. Las "esencias" son prompts de texto, así que no dependen de ningún proveedor.
 
+## 🚀 Inicio rápido (clonar en otra PC)
+
+Requisitos: [Git](https://git-scm.com/download/win) y [Python 3.10+](https://www.python.org/downloads/).
+
+```powershell
+# 1. Clonar (repo privado -> pedirá login de GitHub la 1a vez)
+git clone https://github.com/pipiialan/TradesAgents.git
+cd TradesAgents
+
+# 2. Crear entorno e instalar dependencias
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# 3. Crear tu .env (NO viene en el repo) y poner tu API key
+copy .env.example .env
+#    -> abre .env y pega tu key. Gemini gratis: aistudio.google.com/apikey
+
+# 4. Correr la app
+.\.venv\Scripts\python.exe -m uvicorn src.api:app --port 8850
+```
+
+Luego abre **http://localhost:8850** en el navegador.
+
+> 🔑 El `.env` con tu API key NUNCA se sube a GitHub (seguridad): recréalo en cada PC.
+> 📊 Para datos en vivo necesitas **NinjaTrader 8** abierto con el indicador
+> `ninjatrader/TradingAgentsExporter.cs` compilado en un gráfico de 1 minuto.
+> Sin NinjaTrader, la app usa datos de ejemplo (`data/sample_context_NQ.json`).
+
+### Sincronizar entre tus PCs
+```powershell
+git pull      # antes de empezar: trae lo último
+git push      # al terminar: sube tus cambios
+```
+
 ## Arquitectura
 
 ```

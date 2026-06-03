@@ -102,7 +102,9 @@ async def analizar(par: str, contexto: dict, fecha: str,
     """Análisis completo de un par. provider/api_key/modelos vienen de la app; si no, usa los de .env."""
     par = par.upper()
     pool = pool_de(par)
-    traders = load_pool(BASE / POOL_DIRS[pool])
+    modo = contexto.get("modo", "scalping")
+    pool_dir = POOL_DIRS[pool] + ("-intradia" if modo == "intradia" else "")
+    traders = load_pool(BASE / pool_dir)
 
     mt, mj = models_for(provider) if provider else (MODEL_TEAM, MODEL_JEFE)
     if model_team:

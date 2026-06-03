@@ -11,8 +11,8 @@ from zoneinfo import ZoneInfo
 
 # Velas por TF según el modo (confirmado con el usuario para scalping).
 WINDOWS = {
-    "scalping": {"1m": 100, "5m": 60, "15m": 50, "1h": 24, "1d": 3},
-    "intradia": {"1m": 45,  "5m": 60, "15m": 60, "1h": 48, "1d": 10},
+    "scalping": {"1m": 100, "5m": 60,  "15m": 50,  "1h": 24,  "1d": 3},
+    "intradia": {"5m": 150, "15m": 200, "30m": 230, "1h": 115, "4h": 58, "1d": 30},
 }
 
 _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
@@ -178,11 +178,11 @@ def preparar_contexto(raw: dict, modo: str = "scalping") -> dict:
     ctx = dict(raw)
     ctx["modo"] = modo
 
+    tfs = raw.get("timeframes") or {}
     nuevos = {}
-    for tf, data in (raw.get("timeframes") or {}).items():
-        bars = (data or {}).get("ultimas_barras", []) or []
-        n = win.get(tf)
-        if n is not None:
+    for tf, n in win.items():                     # solo los TF del modo (scalping vs intradía)
+        bars = ((tfs.get(tf) or {}).get("ultimas_barras")) or []
+        if n:
             bars = bars[-n:]                      # las más recientes
         closes = [b["c"] for b in bars]
         nuevos[tf] = {

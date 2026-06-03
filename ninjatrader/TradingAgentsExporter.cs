@@ -28,7 +28,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 Description = "Exporta contexto multi-TF a un JSON para la app TradingAgents.";
                 Calculate   = Calculate.OnBarClose;
                 IsOverlay   = true;
-                ExportFolder = @"C:\Users\Soles\Documents\TradingAgents\data";
+                ExportFolder = @"e:\Bots trading\RESURECCIONDEPAQUITA\TradesAgents\data";
             }
             else if (State == State.Configure)
             {

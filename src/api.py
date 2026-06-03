@@ -35,6 +35,7 @@ class OrdenReq(BaseModel):
     sl: float | None = None
     tp: float | None = None
     cuenta: str = "Sim101"
+    confirmado: bool = False  # gate: sin esto NO se escribe la orden para NinjaTrader
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -49,7 +50,10 @@ async def instrumentos():
 
 @app.post("/analizar")
 async def analizar_ep(req: AnalisisReq):
-    if not req.api_key.strip():
+    # claudecli usa la suscripcion del CLI (puente local): no requiere API key.
+    es_cli = req.provider == "claudecli"
+    key = req.api_key.strip() or None
+    if not es_cli and not key:
         return JSONResponse({"error": "Falta la API key."}, status_code=400)
     # Datos en vivo de NinjaTrader si están disponibles; si no, stub de ejemplo.
     contexto = get_context(req.par)
@@ -57,7 +61,7 @@ async def analizar_ep(req: AnalisisReq):
     try:
         res = await analizar(
             req.par, contexto, fecha,
-            provider=req.provider, api_key=req.api_key,
+            provider=req.provider, api_key=key,
             model_team=req.model_team or None, model_jefe=req.model_jefe or None,
             forzar_noticias=req.forzar_noticias,
         )
@@ -88,6 +92,14 @@ async def ejecutar_ep(req: OrdenReq):
         "cuenta": req.cuenta,
         "tipo": "MARKET",
     }
+    # GATE server-side: sin confirmado=True NO se escribe nada para NinjaTrader.
+    # Asi un POST directo (curl, otro cliente) tampoco puede disparar la orden.
+    if not req.confirmado:
+        return {
+            "requiere_confirmacion": True,
+            "orden": orden,
+            "mensaje": "Revisa la orden y confírmala para enviarla a NinjaTrader.",
+        }
     (BASE / "data" / "order_request.json").write_text(
         _json.dumps(orden, ensure_ascii=False, indent=2), encoding="utf-8"
     )

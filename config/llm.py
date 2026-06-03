@@ -18,6 +18,9 @@ PROVIDERS = {
     "gemini":     {"team": "gemini/gemini-2.5-flash",               "jefe": "gemini/gemini-2.5-flash"},
     "anthropic":  {"team": "claude-haiku-4-5",                      "jefe": "claude-sonnet-4-5"},
     "openrouter": {"team": "openrouter/qwen/qwen-2.5-72b-instruct", "jefe": "openrouter/qwen/qwen-2.5-72b-instruct"},
+    # Puente local al CLI de Claude (suscripcion, NO API key). El prefijo openai/
+    # hace que LiteLLM honre api_base (LLM_API_BASE -> http://127.0.0.1:8787/v1).
+    "claudecli":  {"team": "openai/claude-team",                    "jefe": "openai/claude-jefe"},
 }
 
 PROVIDER = (os.getenv("PROVIDER") or "groq").lower()
@@ -48,8 +51,11 @@ async def complete(system: str, user: str, model: str,
     }
     if api_key:
         kwargs["api_key"] = api_key
-    if api_base:
-        kwargs["api_base"] = api_base
+    # api_base sigue siendo opcional per-request; si no llega, sale del .env
+    # (LLM_API_BASE) para apuntar al puente local sin tocar el orquestador.
+    base = api_base or os.getenv("LLM_API_BASE")
+    if base:
+        kwargs["api_base"] = base
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
 

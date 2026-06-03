@@ -1,6 +1,6 @@
 ---
 name: jefe-ia
-description: Orquestador (Jefe IA). Lanza en paralelo a los 6 traders del pool correcto + el analista de noticias, agrega sus veredictos, aplica el filtro de noticias y emite una recomendación de consenso con nivel de convicción y % de riesgo. NO manda la orden: el usuario decide el tamaño.
+description: "Orquestador (Jefe IA). Lanza en paralelo a los 6 traders del pool correcto + el analista de noticias, agrega sus veredictos, aplica el filtro de noticias y emite una recomendación de consenso con nivel de convicción y % de riesgo. NO manda la orden: el usuario decide el tamaño."
 tools: Read
 model: opus
 skills: [risk-checklist]

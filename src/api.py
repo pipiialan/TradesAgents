@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .orchestrator import analizar
 from .market_data import get_context
+from .features import preparar_contexto
 from config.instruments import INSTRUMENTS
 
 BASE = Path(__file__).resolve().parents[1]
@@ -25,6 +26,7 @@ class AnalisisReq(BaseModel):
     api_key: str
     model_team: str = ""
     model_jefe: str = ""
+    modo: str = "scalping"        # scalping | intradia (define la ventana de velas)
     forzar_noticias: bool = False
 
 
@@ -55,8 +57,8 @@ async def analizar_ep(req: AnalisisReq):
     key = req.api_key.strip() or None
     if not es_cli and not key:
         return JSONResponse({"error": "Falta la API key."}, status_code=400)
-    # Datos en vivo de NinjaTrader si están disponibles; si no, stub de ejemplo.
-    contexto = get_context(req.par)
+    # Datos en vivo de NinjaTrader (o stub), recortados al modo + indicadores calculados.
+    contexto = preparar_contexto(get_context(req.par), req.modo)
     fecha = date.today().isoformat()
     try:
         res = await analizar(

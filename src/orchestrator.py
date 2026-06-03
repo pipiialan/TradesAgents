@@ -43,8 +43,11 @@ async def _run_agent(persona: dict, user_prompt: str, model: str, api_key: str |
 
 
 def _prompt_trader(par: str, contexto: dict, noticias: dict) -> str:
+    modo = contexto.get("modo", "scalping")
     return (
         f"Par a analizar: {par} ({INSTRUMENTS[par]['nombre']}).\n"
+        f"Modo de operación: {modo} — ajusta tu enfoque de temporalidades a este estilo.\n"
+        f"Cada TF trae velas (oldest->newest) + indicadores calculados (ema9, ema20, adx, vwap).\n"
         f"Contexto de mercado (multi-TF):\n{json.dumps(contexto, ensure_ascii=False, indent=2)}\n\n"
         f"Resumen de noticias del analista:\n{json.dumps(noticias, ensure_ascii=False, indent=2)}\n\n"
         "Aplica TU metodología y devuelve solo tu JSON de veredicto."

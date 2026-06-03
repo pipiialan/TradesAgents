@@ -65,6 +65,13 @@
           <option value="XAUUSD">XAUUSD — Oro spot</option>
         </select>
       </div>
+      <div>
+        <label>Tipo de trade</label>
+        <select id="modo">
+          <option value="scalping">Scalping (1m·5m·15m + sesgo 1h)</option>
+          <option value="intradia">Intradía (5m·15m·1h + diario)</option>
+        </select>
+      </div>
     </div>
     <div class="row">
       <div>
@@ -164,6 +171,7 @@ async function analizar() {
     api_key: esCli ? 'cli' : document.getElementById('apikey').value,
     model_team: document.getElementById('model_team').value,
     model_jefe: document.getElementById('model_jefe').value,
+    modo: document.getElementById('modo').value,
   };
   if (!esCli && !body.api_key.trim()) { out.innerHTML = '<div class="err">Primero pega tu API key.</div>'; return; }
   out.innerHTML = ''; spin.style.display = 'block'; btn.disabled = true;

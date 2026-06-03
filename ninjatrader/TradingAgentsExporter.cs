@@ -46,8 +46,8 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (BarsInProgress != 0) return;
             if (State != State.Realtime) return;
 
-            // Necesitamos historia suficiente en todas las series.
-            if (CurrentBars[0] < 19) return;
+            // Necesitamos al menos algo de historia (los arreglos usan Math.Min).
+            if (CurrentBars[0] < 1) return;
             if (CurrentBars[1] < 0 || CurrentBars[2] < 0 || CurrentBars[3] < 0) return;
             if (CurrentBars[4] < 1) return;
 
@@ -77,23 +77,13 @@ namespace NinjaTrader.NinjaScript.Indicators
             sb.AppendFormat("\"timestamp\":\"{0}\",", Times[0][0].ToString("yyyy-MM-ddTHH:mm:ss"));
             sb.AppendFormat("\"precio_actual\":{0},", F(Closes[0][0]));
 
+            // Ventana generosa por TF (la app recorta segun el modo scalping/intradia).
             sb.Append("\"timeframes\":{");
-
-            // Últimas 20 velas de 1m (de la más vieja a la más nueva).
-            sb.Append("\"1m\":{\"ultimas_barras\":[");
-            int n = Math.Min(20, CurrentBars[0] + 1);
-            for (int i = n - 1; i >= 0; i--)
-            {
-                sb.AppendFormat("{{\"o\":{0},\"h\":{1},\"l\":{2},\"c\":{3},\"v\":{4}}}",
-                    F(Opens[0][i]), F(Highs[0][i]), F(Lows[0][i]), F(Closes[0][i]), F(Volumes[0][i]));
-                if (i > 0) sb.Append(",");
-            }
-            sb.Append("]},");
-
-            sb.AppendFormat("\"5m\":{{\"c\":{0},\"h\":{1},\"l\":{2}}},",  F(Closes[1][0]), F(Highs[1][0]), F(Lows[1][0]));
-            sb.AppendFormat("\"15m\":{{\"c\":{0},\"h\":{1},\"l\":{2}}},", F(Closes[2][0]), F(Highs[2][0]), F(Lows[2][0]));
-            sb.AppendFormat("\"1h\":{{\"c\":{0},\"h\":{1},\"l\":{2}}}",   F(Closes[3][0]), F(Highs[3][0]), F(Lows[3][0]));
-
+            sb.Append("\"1m\":{\"ultimas_barras\":");  AppendBars(sb, 0, 120); sb.Append("},");
+            sb.Append("\"5m\":{\"ultimas_barras\":");  AppendBars(sb, 1, 80);  sb.Append("},");
+            sb.Append("\"15m\":{\"ultimas_barras\":"); AppendBars(sb, 2, 60);  sb.Append("},");
+            sb.Append("\"1h\":{\"ultimas_barras\":");  AppendBars(sb, 3, 48);  sb.Append("},");
+            sb.Append("\"1d\":{\"ultimas_barras\":");  AppendBars(sb, 4, 10);  sb.Append("}");
             sb.Append("},");
 
             sb.Append("\"niveles_clave\":{");
@@ -103,6 +93,21 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             sb.Append("}");
             return sb.ToString();
+        }
+
+        // Arreglo JSON de hasta maxBars velas (de la mas vieja a la mas nueva) de la serie seriesIdx.
+        private void AppendBars(StringBuilder sb, int seriesIdx, int maxBars)
+        {
+            sb.Append("[");
+            int avail = CurrentBars[seriesIdx] + 1;
+            int n = Math.Min(maxBars, avail);
+            for (int i = n - 1; i >= 0; i--)
+            {
+                sb.AppendFormat("{{\"o\":{0},\"h\":{1},\"l\":{2},\"c\":{3},\"v\":{4}}}",
+                    F(Opens[seriesIdx][i]), F(Highs[seriesIdx][i]), F(Lows[seriesIdx][i]), F(Closes[seriesIdx][i]), F(Volumes[seriesIdx][i]));
+                if (i > 0) sb.Append(",");
+            }
+            sb.Append("]");
         }
     }
 }

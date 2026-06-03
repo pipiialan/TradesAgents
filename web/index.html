@@ -37,6 +37,7 @@
 <header>
   <h1>🤖 TradingAgents — Jefe IA</h1>
   <p>Equipo de 6 traders + noticias. Tú eliges el modelo, ves qué dijo cada uno y ejecutas a NinjaTrader.</p>
+  <div id="relojny" style="margin-top:8px;font-size:14px;color:#3fb950;font-weight:600">🕐 NY —</div>
 </header>
 
 <div class="wrap">
@@ -261,6 +262,24 @@ async function ejecutarOrden(dir) {
     alert(res.error ? ('Error: ' + res.error) : ('✅ ' + (res.mensaje || 'Orden enviada a NinjaTrader. Revisa la plataforma.')));
   } catch (e) { alert('Error de conexión: ' + e); }
 }
+
+function _relojNY() {
+  const ny = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const hm = ny.getHours() * 60 + ny.getMinutes();
+  const dow = ny.getDay();
+  let s;
+  if (dow === 0 || dow === 6) s = 'fin de semana (cerrado)';
+  else if (hm >= 120 && hm < 300) s = 'London killzone';
+  else if (hm >= 420 && hm < 600) s = 'NY killzone (apertura)';
+  else if (hm >= 570 && hm < 960) s = 'RTH (sesión NY)';
+  else if (hm < 570) s = 'pre-market';
+  else s = 'fuera de sesión';
+  const hh = String(ny.getHours()).padStart(2, '0'), mm = String(ny.getMinutes()).padStart(2, '0');
+  const el = document.getElementById('relojny');
+  if (el) el.textContent = `🕐 NY ${hh}:${mm} · ${s}`;
+}
+setInterval(_relojNY, 30000);
+_relojNY();
 
 poblarModelos();
 </script>

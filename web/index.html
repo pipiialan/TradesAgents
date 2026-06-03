@@ -207,7 +207,7 @@ function render(d) {
         <div><label>Cantidad (micros)</label><input id="qty" type="number" value="1" min="1"></div>
       </div>
       <button style="background:${dir === 'LONG' ? '#1f6feb' : '#da3633'}" onclick="ejecutarOrden('${dir}')">⚡ Ejecutar ${dir} en NinjaTrader</button>
-      <div class="hint">Orden ${dir} ${j.tipo_orden || 'MARKET'}${j.entrada ? ' @ ' + j.entrada : ''} · SL ${j.sl ?? '—'} / TP ${j.tp ?? '—'}. Te pedirá confirmación.</div>
+      <div class="hint">Orden ${dir} ${j.tipo_orden || 'MARKET'}${j.entrada ? ' @ ' + j.entrada : ''} · SL ${j.sl ?? '—'} / TP ${j.tp ?? '—'}${j.vigencia_min ? ' · vigencia ' + j.vigencia_min + ' min' : ''}. Te pedirá confirmación.</div>
     </div>`;
   }
 
@@ -245,7 +245,7 @@ async function ejecutarOrden(dir) {
   const acct = document.getElementById('acct').value;
   const qty = parseInt(document.getElementById('qty').value || '1', 10);
   const aviso = acct === 'Sim101' ? '(cuenta simulada)' : '⚠️ CUENTA REAL/EVALUACIÓN — dinero de verdad';
-  const base = { par: window._par, direccion: dir, qty, tipo: (j.tipo_orden || 'MARKET'), entrada: (j.entrada ?? null), sl: j.sl, tp: j.tp, cuenta: acct };
+  const base = { par: window._par, direccion: dir, qty, tipo: (j.tipo_orden || 'MARKET'), entrada: (j.entrada ?? null), vigencia_min: (j.vigencia_min ?? null), sl: j.sl, tp: j.tp, cuenta: acct };
   const post = (body) => fetch('/ejecutar', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }).then(r => r.json());
@@ -255,7 +255,7 @@ async function ejecutarOrden(dir) {
     if (res.error) { alert('Error: ' + res.error); return; }
     if (res.requiere_confirmacion) {
       const o = res.orden || {};
-      if (!confirm(`Confirmar envío a NinjaTrader ${aviso}:\n\n${dir} ${o.qty} ${window._par} · ${o.tipo}${o.entrada ? ' @ ' + o.entrada : ' (mercado)'}\nCuenta: ${o.cuenta}\nSL ${o.sl ?? '—'} / TP ${o.tp ?? '—'}`)) return;
+      if (!confirm(`Confirmar envío a NinjaTrader ${aviso}:\n\n${dir} ${o.qty} ${window._par} · ${o.tipo}${o.entrada ? ' @ ' + o.entrada : ' (mercado)'}${o.vigencia_min ? ' · vigencia ' + o.vigencia_min + ' min' : ''}\nCuenta: ${o.cuenta}\nSL ${o.sl ?? '—'} / TP ${o.tp ?? '—'}`)) return;
       // PASO 2: ahora sí, con confirmado=true -> el backend escribe la orden.
       res = await post({ ...base, confirmado: true });
     }

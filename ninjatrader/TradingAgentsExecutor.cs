@@ -66,7 +66,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                 else if (CurrentBar >= pExpiraBar)
                 {
                     pend = false;
-                    WriteStatus(pId, "EXPIRADA", "no se lleno la " + pTipo + " en " + VelasVida + " velas");
+                    WriteStatus(pId, "EXPIRADA", "no se lleno la " + pTipo + " a tiempo (vigencia agotada)");
                 }
                 else if (CurrentBar != pUltimaBar)
                 {
@@ -109,6 +109,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                 string tipo = GetStr(json, "tipo");
                 int qty = (int)GetNum(json, "qty", 1);
                 double entrada = GetNum(json, "entrada", 0);
+                double vigencia = GetNum(json, "vigencia_min", 0);
                 double sl = GetNum(json, "sl", 0);
                 double tp = GetNum(json, "tp", 0);
                 lastOrderId = id;
@@ -124,12 +125,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 
                 if ((tipo == "LIMIT" || tipo == "STOP") && entrada > 0 && (accion == "LONG" || accion == "SHORT"))
                 {
+                    int velasVida = vigencia > 0 ? (int)vigencia : VelasVida;   // vigencia (min) = velas en grafico 1m
                     pId = id; pAccion = accion; pTipo = tipo; pQty = qty; pPrecio = entrada; pSl = sl; pTp = tp;
-                    pExpiraBar = CurrentBar + VelasVida;
+                    pExpiraBar = CurrentBar + velasVida;
                     pUltimaBar = -1;
                     pend = true;
                     Submit();
-                    WriteStatus(id, "COLOCADA", accion + " " + qty + " " + tipo + " @ " + entrada + " (esperando llenado)");
+                    WriteStatus(id, "COLOCADA", accion + " " + qty + " " + tipo + " @ " + entrada + " (vigencia " + velasVida + " min, esperando llenado)");
                 }
                 else if (accion == "LONG" || accion == "SHORT")
                 {

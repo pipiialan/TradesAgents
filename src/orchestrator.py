@@ -63,6 +63,7 @@ def _prompt_trader(par: str, contexto: dict, noticias: dict) -> str:
         f"Cada TF trae velas (oldest->newest) + indicadores calculados (ema9, ema20, adx, vwap).\n"
         f"Contexto de mercado (multi-TF):\n{json.dumps(contexto, ensure_ascii=False, indent=2)}\n\n"
         f"Resumen de noticias del analista:\n{json.dumps(noticias, ensure_ascii=False, indent=2)}\n\n"
+        "Si tu entrada es LIMIT o STOP, incluye 'vigencia_min' (minutos que tu setup sigue válido antes de cancelar; un scalp suele ser pocos minutos). "
         "Aplica TU metodología y devuelve solo tu JSON de veredicto."
     )
 

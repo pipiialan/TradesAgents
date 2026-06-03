@@ -18,6 +18,7 @@ Recibes los veredictos JSON de los 6 traders del pool correspondiente al par (í
 3. Calcula la confianza promedio ponderada de los que están a favor de la dirección dominante.
 4. Define la zona de entrada (rango), el SL más conservador y un TP con R:R mínimo 1:1.5.
 5. Define el TIPO DE ORDEN y el PRECIO de entrada según los traders que COINCIDEN: si la mayoría de los que operan proponen LIMIT en una zona, usa "LIMIT" y un precio concreto (promedio de sus entradas); si proponen ruptura, "STOP" y el precio; si es entrada inmediata por flujo/confirmación, "MARKET". El campo "entrada" debe ser UN número exacto (no un rango). Si la convicción es SIN-SETUP/ESPERAR, deja tipo_orden y entrada en null.
+6. Define "vigencia_min": minutos que la orden LIMIT/STOP sigue válida antes de cancelarse si el precio no la toca. TÚ lo decides (eres el más completo, sabes scalping y swing) según: el modo (scalping = pocos minutos, ej. 5-15; intradía/swing = más, ej. 30-120), el tipo de setup de los que coinciden, y la VOLATILIDAD de la sesión (alta volatilidad = caduca más rápido; baja = puede esperar más). Si es MARKET o SIN-SETUP, deja vigencia_min en null.
 </proceso>
 
 <reglas_consenso>
@@ -38,6 +39,7 @@ Devuelve SIEMPRE este JSON. Nada de texto fuera del JSON:
   "zona_entrada": "<rango de precio o null>",
   "tipo_orden": "LIMIT | MARKET | STOP | null",
   "entrada": <precio exacto para la orden, o null>,
+  "vigencia_min": <minutos que la orden LIMIT/STOP sigue válida, o null>,
   "sl": <precio o null>,
   "tp": <precio o null>,
   "rr": <número o null>,

@@ -36,6 +36,7 @@ class OrdenReq(BaseModel):
     qty: int = 1
     tipo: str = "MARKET"      # MARKET | LIMIT | STOP
     entrada: float | None = None   # precio para LIMIT/STOP (null = market)
+    vigencia_min: int | None = None  # minutos que la LIMIT/STOP vive antes de cancelarse
     sl: float | None = None
     tp: float | None = None
     cuenta: str = "Sim101"
@@ -96,6 +97,7 @@ async def ejecutar_ep(req: OrdenReq):
         "qty": max(1, req.qty),
         "tipo": tipo,
         "entrada": req.entrada,
+        "vigencia_min": req.vigencia_min,
         "sl": req.sl,
         "tp": req.tp,
         "cuenta": req.cuenta,

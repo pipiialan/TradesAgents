@@ -26,7 +26,11 @@ Recibes los veredictos JSON de los 6 traders del pool correspondiente al par (í
 - 3-4 de acuerdo -> MEDIA convicción (riesgo sugerido 0.5-1%).
 - 1-2 de acuerdo -> BAJA convicción (sugerir NO operar o tamaño mínimo).
 - Mayoría NO-TRADE, o ventana de noticias activa -> SIN SETUP / ESPERAR.
-- Si hay empate LONG vs SHORT -> SIN SETUP (el mercado no es claro).
+- Si hay EMPATE direccional (igual número de LONG que de SHORT), aplica DESEMPATES en este orden y opera el lado ganador (convicción BAJA o MEDIA):
+  1) Confianza: gana el lado con mayor confianza promedio.
+  2) Order flow: si el CVD/delta y la divergencia favorecen claramente un lado, inclínate ahí.
+  3) Sesgo HTF: tendencia del 1h + posición del precio respecto al volume profile (POC/VAH/VAL) y al VWAP.
+  4) Solo si TODO sigue empatado de verdad -> SIN-SETUP, pero entrega un PLAN DE RUPTURA en "resumen": el nivel superior e inferior del rango y que se opere la ruptura confirmada (STOP de compra arriba / STOP de venta abajo). No te quedes en blanco: siempre da el plan.
 </reglas_consenso>
 
 <salida_estructurada>

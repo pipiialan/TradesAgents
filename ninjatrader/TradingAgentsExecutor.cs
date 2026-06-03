@@ -57,6 +57,15 @@ namespace NinjaTrader.NinjaScript.Strategies
                 string id = GetStr(json, "id");
                 if (string.IsNullOrEmpty(id) || id == lastOrderId) return;  // ya procesada
 
+                // Solo proceso ordenes para MI instrumento (permite un ejecutor por par: MNQ, MGC, MES...).
+                string par = GetStr(json, "par");
+                string miInstr = Instrument.MasterInstrument.Name;
+                if (!string.IsNullOrEmpty(par) && !string.Equals(par, miInstr, StringComparison.OrdinalIgnoreCase))
+                {
+                    lastOrderId = id;   // vista por esta instancia; la del par correcto la ejecutara
+                    return;
+                }
+
                 string cuenta = GetStr(json, "cuenta");
                 if (!string.Equals(cuenta, Account.Name, StringComparison.OrdinalIgnoreCase))
                 {

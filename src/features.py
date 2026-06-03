@@ -17,34 +17,40 @@ WINDOWS = {
 
 _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
+# Perfil de sesión (hora ET): (inicio_min, fin_min, nombre, volatilidad, comportamiento)
+_SESIONES = [
+    (120, 300,  "London killzone",        "alta",       "arrancan tendencias, barridos de liquidez"),
+    (300, 420,  "pre-NY",                 "media-baja", "transición London -> NY"),
+    (420, 570,  "NY killzone (pre-open)",  "alta",       "se arma la apertura, sube el volumen"),
+    (570, 660,  "NY open / overlap",      "máxima",     "máximo volumen, movimientos grandes, reversiones"),
+    (660, 720,  "media mañana NY",        "alta-media", "continúa el impulso de la apertura"),
+    (720, 840,  "lunch NY",               "baja",       "choppy, poco fiable, falsos movimientos"),
+    (840, 960,  "PM / cierre NY",         "media-alta", "repunta hacia el cierre"),
+    (960, 1140, "after-hours",            "baja",       "fino, ilíquido"),
+]
+
 
 def _sesion_ny() -> dict:
-    """Hora actual en Nueva York + sesión/killzone activa (para ICT, ORB, VWAP)."""
+    """Hora actual en NY + perfil de la sesión (volatilidad/comportamiento) para que los agentes lo USEN."""
     now = datetime.now(ZoneInfo("America/New_York"))
     hm = now.hour * 60 + now.minute
     dow = now.weekday()
-    kz_london = 120 <= hm < 300        # 02:00-05:00 ET
-    kz_ny = 420 <= hm < 600            # 07:00-10:00 ET
-    rth = 570 <= hm < 960              # 09:30-16:00 ET
+    sesion, vol, comp = "Asia", "baja", "rangos estrechos, ojo con falsos rompimientos"
+    for ini, fin, nom, v, c in _SESIONES:
+        if ini <= hm < fin:
+            sesion, vol, comp = nom, v, c
+            break
     if dow >= 5:
-        sesion = "fin de semana (cerrado/ilíquido)"
-    elif kz_london:
-        sesion = "London killzone"
-    elif kz_ny:
-        sesion = "NY killzone (apertura)"
-    elif rth:
-        sesion = "RTH (sesión NY)"
-    elif hm < 570:
-        sesion = "pre-market"
-    else:
-        sesion = "after-hours / fuera de sesión"
+        sesion, vol, comp = "fin de semana", "muy baja", "mercado cerrado/ilíquido"
     return {
         "hora_ny": now.strftime("%H:%M"),
         "dia": _DIAS[dow],
         "sesion": sesion,
-        "killzone_london": kz_london,
-        "killzone_ny": kz_ny,
-        "rth": rth,
+        "volatilidad": vol,
+        "comportamiento": comp,
+        "killzone_london": 120 <= hm < 300,
+        "killzone_ny": 420 <= hm < 600,
+        "rth": 570 <= hm < 960,
     }
 
 

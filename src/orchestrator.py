@@ -47,17 +47,15 @@ async def _run_agent(persona: dict, user_prompt: str, model: str, api_key: str |
 def _prompt_trader(par: str, contexto: dict, noticias: dict) -> str:
     modo = contexto.get("modo", "scalping")
     sn = contexto.get("sesion_ny", {})
-    es_oro = pool_de(par) == "oro"
-    if es_oro:
-        linea_sesion = (
-            f"Hora de Nueva York: {sn.get('hora_ny', '?')} ({sn.get('dia', '')}) — sesión: {sn.get('sesion', '?')} (informativo). "
-            f"El ORO opera casi 24h (Asia/London/NY): NO limites tu análisis por la sesión ni killzone; evalúa estructura y order flow a cualquier hora.\n"
-        )
-    else:
-        linea_sesion = (
-            f"Hora de Nueva York: {sn.get('hora_ny', '?')} ({sn.get('dia', '')}) — sesión: {sn.get('sesion', '?')}. "
-            f"Respeta tu horario: ICT solo opera en killzones (London/NY) y ORB solo en la apertura de NY.\n"
-        )
+    nota_pool = ("El ORO opera casi 24h (Asia/London/NY)." if pool_de(par) == "oro"
+                 else "ICT y ORB rinden mejor en killzone/apertura de NY.")
+    linea_sesion = (
+        f"Hora de Nueva York: {sn.get('hora_ny', '?')} ({sn.get('dia', '')}) — sesión: {sn.get('sesion', '?')}, "
+        f"volatilidad {sn.get('volatilidad', '?')} ({sn.get('comportamiento', '')}). {nota_pool}\n"
+        f"USA el perfil de la sesión para ajustar tu CONFIANZA y tamaño (más volatilidad = movimientos más reales/fiables; baja = cautela, posible choppy). "
+        f"NO devuelvas NO-TRADE solo por la hora: si hay un setup válido, opéralo con la confianza que merezca la sesión. "
+        f"Esta lógica de sesión tiene prioridad sobre cualquier regla de horario fija de tu metodología.\n"
+    )
     return (
         f"Par a analizar: {par} ({INSTRUMENTS[par]['nombre']}).\n"
         f"{linea_sesion}"

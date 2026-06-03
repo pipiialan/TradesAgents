@@ -18,8 +18,9 @@ from config.llm import complete, models_for, MODEL_TEAM, MODEL_JEFE
 
 BASE = Path(__file__).resolve().parents[1]
 
-# Límite de llamadas LLM en paralelo (evita rate limits del proveedor).
-_SEM = asyncio.Semaphore(4)
+# Límite de llamadas LLM en paralelo. 6 = los 6 traders corren en UNA sola tanda.
+# Si el CLI/proveedor empieza a frenar (throttle), bajalo a 4.
+_SEM = asyncio.Semaphore(6)
 
 
 def _parse_json(raw: str) -> dict:

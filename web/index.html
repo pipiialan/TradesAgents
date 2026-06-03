@@ -82,7 +82,7 @@
     <div class="hint" id="getkey">Gemini gratis: aistudio.google.com/apikey · Groq gratis: console.groq.com/keys</div>
   </div>
 
-  <div class="spin" id="spin">⏳ Consultando a los 6 traders + noticias + Jefe IA… (puede tardar ~20-40s)</div>
+  <div class="spin" id="spin">⏳ Consultando a los 6 traders + noticias + Jefe IA… (con Opus puede tardar varios minutos)</div>
   <div id="out"></div>
 
   <div class="disc">⚠️ Análisis asistido por IA, con fines educativos. No es asesoría financiera. Datos de mercado EN VIVO desde
@@ -94,9 +94,11 @@
 // Modelos del CLI de Claude (suscripción). El prefijo openai/ hace que LiteLLM
 // rutee al puente; éste mapea claude-haiku/sonnet/opus -> alias del CLI.
 const CLI_MODELS = [
-  { value: 'openai/claude-haiku',  label: 'Haiku — rápido, menos cuota' },
-  { value: 'openai/claude-sonnet', label: 'Sonnet — equilibrado' },
-  { value: 'openai/claude-opus',   label: 'Opus 4.8 — máx calidad (más lento/cuota)' },
+  { value: 'openai/claude-opus-low',    label: 'Opus 4.8 · low (más rápido)' },
+  { value: 'openai/claude-opus-medium', label: 'Opus 4.8 · medium' },
+  { value: 'openai/claude-opus-high',   label: 'Opus 4.8 · high' },
+  { value: 'openai/claude-opus-xhigh',  label: 'Opus 4.8 · xhigh' },
+  { value: 'openai/claude-opus-max',    label: 'Opus 4.8 · max (mejor, más lento)' },
 ];
 const MODEL_MAP = {
   gemini: ['gemini/gemini-2.5-flash', 'gemini/gemini-2.5-pro', 'gemini/gemini-2.0-flash', 'gemini/gemini-2.5-flash-lite'],
@@ -125,8 +127,8 @@ function poblarModelos() {
         sel.appendChild(o);
       });
     };
-    fill('model_team', 'openai/claude-sonnet');
-    fill('model_jefe', 'openai/claude-opus');
+    fill('model_team', 'openai/claude-opus-medium');
+    fill('model_jefe', 'openai/claude-opus-max');
     key.disabled = true; key.value = '';
     key.placeholder = 'no necesaria — usa tu suscripción de Claude';
     getkey.textContent = 'Usa el CLI de Claude (suscripción). Puente corriendo: bridge/run_bridge.ps1';

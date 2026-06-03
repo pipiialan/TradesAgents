@@ -67,11 +67,14 @@ MODEL_MAP = {
     "claude-opus": "opus",
 }
 DEFAULT_MODEL = "sonnet"
-TIMEOUT_S = int(os.getenv("CLAUDE_BRIDGE_TIMEOUT", "120"))
+# Niveles de esfuerzo del CLI (--effort). Mas esfuerzo = mejor pero mas lento/cuota.
+EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+# Opus con esfuerzo alto/max puede tardar varios minutos por llamada -> timeout amplio.
+TIMEOUT_S = int(os.getenv("CLAUDE_BRIDGE_TIMEOUT", "600"))
 
-# Solo un subprocess de claude a la vez evita topar memoria/CPU y respeta
-# implicitamente el semaforo de 4 de la app sin pelear por el keychain.
-_SEM = asyncio.Semaphore(int(os.getenv("CLAUDE_BRIDGE_CONCURRENCY", "3")))
+# Concurrencia baja a proposito: la suscripcion (no API) throttlea si le pegas
+# muchas llamadas a la vez, y con Opus eso causaba timeouts. 2 a la vez es estable.
+_SEM = asyncio.Semaphore(int(os.getenv("CLAUDE_BRIDGE_CONCURRENCY", "2")))
 
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
@@ -89,9 +92,17 @@ class ChatReq(BaseModel):
     stream: bool | None = False
 
 
-def _resolve_model(model: str) -> str:
+def _resolve_model(model: str) -> tuple[str, str | None]:
+    """Devuelve (alias_modelo, effort). Acepta sufijo de esfuerzo:
+    'openai/claude-opus-max' -> ('opus','max'); 'openai/claude-team' -> ('haiku', None)."""
     name = (model or "").split("/")[-1].strip()  # quita prefijo "openai/"
-    return MODEL_MAP.get(name, name or DEFAULT_MODEL)
+    effort = None
+    for e in EFFORTS:
+        if name.endswith("-" + e):
+            effort = e
+            name = name[: -(len(e) + 1)]
+            break
+    return MODEL_MAP.get(name, name or DEFAULT_MODEL), effort
 
 
 def _split_messages(msgs: list[Message]) -> tuple[str, str]:
@@ -116,7 +127,7 @@ def _child_env(force_json: bool) -> dict:
     return env
 
 
-async def _run_claude(system: str, user: str, model: str, force_json: bool) -> str:
+async def _run_claude(system: str, user: str, model: str, effort: str | None, force_json: bool) -> str:
     # El user va por STDIN, no como argumento: los prompts de traders (contexto
     # multi-TF + noticias en JSON) pueden ser grandes y en Windows la linea de
     # comando topa ~32k chars. Por stdin no hay ese limite.
@@ -128,6 +139,8 @@ async def _run_claude(system: str, user: str, model: str, force_json: bool) -> s
         "--permission-mode", "plan",   # nunca puede escribir/ejecutar nada
         "--no-session-persistence",
     ]
+    if effort:
+        args += ["--effort", effort]   # low|medium|high|xhigh|max
     if system:
         args += ["--system-prompt", system]
 
@@ -174,11 +187,11 @@ async def _run_claude(system: str, user: str, model: str, force_json: bool) -> s
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatReq):
     system, user = _split_messages(req.messages)
-    model = _resolve_model(req.model)
+    model, effort = _resolve_model(req.model)
     force_json = bool(req.response_format and req.response_format.get("type") == "json_object")
 
     async with _SEM:
-        content = await _run_claude(system, user, model, force_json)
+        content = await _run_claude(system, user, model, effort, force_json)
 
     now = int(time.time())
     return {

@@ -11,9 +11,9 @@ using NinjaTrader.NinjaScript;
 #endregion
 
 // Indicador puente para la app TradingAgents.
-// Exporta contexto multi-TF (velas por TF) + ORDER FLOW (delta/CVD/volume profile, Level 1)
-// a un JSON que lee la app. La carpeta default apunta a la PC de casa; ajustala en las
-// propiedades del indicador segun la PC (en la otra PC es C:\Users\Soles\Documents\TradingAgents\data).
+// Exporta multi-TF (1m/5m/15m/30m/1h/4h/1d) + ORDER FLOW (delta/CVD/volume profile, Level 1)
+// + niveles (PDH/PDL/PDC para pivots) a un JSON que lee la app. La app recorta por modo
+// (scalping/intradia). Ruta default = PC de casa; ajustala en las propiedades segun la PC.
 namespace NinjaTrader.NinjaScript.Indicators
 {
     public class TradingAgentsExporter : Indicator
@@ -22,13 +22,12 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "Carpeta de exportación", Order = 1, GroupName = "Parameters")]
         public string ExportFolder { get; set; }
 
-        // --- Order flow (Fase 2a): clasificacion bid/ask via OnMarketData ---
         private double curBid, curAsk;
         private long sessionCvd;
         private long bar1mDelta, bar1mMax, bar1mMin, bar1mVol;
         private long bar5mDelta, bar5mVol;
-        private readonly List<long[]> of1m = new List<long[]>();   // {d, cvd, v, mx, mn}
-        private readonly List<long[]> of5m = new List<long[]>();   // {d, cvd, v}
+        private readonly List<long[]> of1m = new List<long[]>();
+        private readonly List<long[]> of5m = new List<long[]>();
         private readonly Dictionary<double, long> volByPrice = new Dictionary<double, long>();
 
         protected override void OnStateChange()
@@ -47,10 +46,11 @@ namespace NinjaTrader.NinjaScript.Indicators
                 AddDataSeries(BarsPeriodType.Minute, 15);  // index 2
                 AddDataSeries(BarsPeriodType.Minute, 60);  // index 3
                 AddDataSeries(BarsPeriodType.Day, 1);      // index 4
+                AddDataSeries(BarsPeriodType.Minute, 30);  // index 5
+                AddDataSeries(BarsPeriodType.Minute, 240); // index 6 (4h)
             }
         }
 
-        // Clasifica cada operacion: en el ASK = compra agresiva, en el BID = venta agresiva.
         protected override void OnMarketData(MarketDataEventArgs e)
         {
             if (BarsInProgress != 0) return;
@@ -127,15 +127,17 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             sb.Append("\"timeframes\":{");
             sb.Append("\"1m\":{\"ultimas_barras\":");  AppendBars(sb, 0, 120); sb.Append("},");
-            sb.Append("\"5m\":{\"ultimas_barras\":");  AppendBars(sb, 1, 80);  sb.Append("},");
-            sb.Append("\"15m\":{\"ultimas_barras\":"); AppendBars(sb, 2, 60);  sb.Append("},");
-            sb.Append("\"1h\":{\"ultimas_barras\":");  AppendBars(sb, 3, 48);  sb.Append("},");
-            sb.Append("\"1d\":{\"ultimas_barras\":");  AppendBars(sb, 4, 10);  sb.Append("}");
+            sb.Append("\"5m\":{\"ultimas_barras\":");  AppendBars(sb, 1, 160); sb.Append("},");
+            sb.Append("\"15m\":{\"ultimas_barras\":"); AppendBars(sb, 2, 200); sb.Append("},");
+            sb.Append("\"30m\":{\"ultimas_barras\":"); AppendBars(sb, 5, 240); sb.Append("},");
+            sb.Append("\"1h\":{\"ultimas_barras\":");  AppendBars(sb, 3, 120); sb.Append("},");
+            sb.Append("\"4h\":{\"ultimas_barras\":");  AppendBars(sb, 6, 60);  sb.Append("},");
+            sb.Append("\"1d\":{\"ultimas_barras\":");  AppendBars(sb, 4, 35);  sb.Append("}");
             sb.Append("},");
 
             sb.Append("\"niveles_clave\":{");
-            sb.AppendFormat("\"pdh\":{0},\"pdl\":{1},\"dia_high\":{2},\"dia_low\":{3}",
-                F(Highs[4][1]), F(Lows[4][1]), F(Highs[4][0]), F(Lows[4][0]));
+            sb.AppendFormat("\"pdh\":{0},\"pdl\":{1},\"pdc\":{2},\"dia_high\":{3},\"dia_low\":{4}",
+                F(Highs[4][1]), F(Lows[4][1]), F(Closes[4][1]), F(Highs[4][0]), F(Lows[4][0]));
             sb.Append("},");
 
             sb.Append("\"order_flow\":{");

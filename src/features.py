@@ -171,6 +171,26 @@ def _enriquecer_order_flow(ctx: dict, raw: dict) -> None:
         ctx["volume_profile"] = pvv
 
 
+def _pivots(niv: dict):
+    """Pivots de piso (PP/R/S) y Camarilla desde el día previo (pdh/pdl/pdc)."""
+    h, l, c = niv.get("pdh"), niv.get("pdl"), niv.get("pdc")
+    if not (h and l and c):
+        return None
+    pp = (h + l + c) / 3.0
+    rng = h - l
+    floor = {
+        "PP": round(pp, 2),
+        "R1": round(2 * pp - l, 2), "S1": round(2 * pp - h, 2),
+        "R2": round(pp + rng, 2), "S2": round(pp - rng, 2),
+        "R3": round(h + 2 * (pp - l), 2), "S3": round(l - 2 * (h - pp), 2),
+    }
+    cam = {
+        "H4": round(c + rng * 1.1 / 2, 2), "H3": round(c + rng * 1.1 / 4, 2),
+        "L3": round(c - rng * 1.1 / 4, 2), "L4": round(c - rng * 1.1 / 2, 2),
+    }
+    return {"floor": floor, "camarilla": cam}
+
+
 def preparar_contexto(raw: dict, modo: str = "scalping") -> dict:
     """Recorta por modo y agrega indicadores calculados por TF."""
     modo = modo if modo in WINDOWS else "scalping"
@@ -198,4 +218,7 @@ def preparar_contexto(raw: dict, modo: str = "scalping") -> dict:
     ctx["timeframes"] = nuevos
     ctx["sesion_ny"] = _sesion_ny()
     _enriquecer_order_flow(ctx, raw)
+    piv = _pivots(raw.get("niveles_clave") or {})
+    if piv:
+        ctx["pivots"] = piv
     return ctx

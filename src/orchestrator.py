@@ -46,8 +46,11 @@ async def _run_agent(persona: dict, user_prompt: str, model: str, api_key: str |
 
 def _prompt_trader(par: str, contexto: dict, noticias: dict) -> str:
     modo = contexto.get("modo", "scalping")
+    sn = contexto.get("sesion_ny", {})
     return (
         f"Par a analizar: {par} ({INSTRUMENTS[par]['nombre']}).\n"
+        f"Hora de Nueva York: {sn.get('hora_ny', '?')} ({sn.get('dia', '')}) — sesión: {sn.get('sesion', '?')}. "
+        f"Respeta tu horario: ICT solo opera en killzones (London/NY) y ORB solo en la apertura de NY.\n"
         f"Modo de operación: {modo} — ajusta tu enfoque de temporalidades a este estilo.\n"
         f"Cada TF trae velas (oldest->newest) + indicadores calculados (ema9, ema20, adx, vwap).\n"
         f"Contexto de mercado (multi-TF):\n{json.dumps(contexto, ensure_ascii=False, indent=2)}\n\n"

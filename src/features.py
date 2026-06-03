@@ -6,11 +6,46 @@ El exporter de NinjaTrader manda una ventana generosa por TF. Aquí:
      no la IA, para que los agentes decidan sobre números reales.
 """
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 # Velas por TF según el modo (confirmado con el usuario para scalping).
 WINDOWS = {
     "scalping": {"1m": 100, "5m": 60, "15m": 50, "1h": 24, "1d": 3},
     "intradia": {"1m": 45,  "5m": 60, "15m": 60, "1h": 48, "1d": 10},
 }
+
+_DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+
+def _sesion_ny() -> dict:
+    """Hora actual en Nueva York + sesión/killzone activa (para ICT, ORB, VWAP)."""
+    now = datetime.now(ZoneInfo("America/New_York"))
+    hm = now.hour * 60 + now.minute
+    dow = now.weekday()
+    kz_london = 120 <= hm < 300        # 02:00-05:00 ET
+    kz_ny = 420 <= hm < 600            # 07:00-10:00 ET
+    rth = 570 <= hm < 960              # 09:30-16:00 ET
+    if dow >= 5:
+        sesion = "fin de semana (cerrado/ilíquido)"
+    elif kz_london:
+        sesion = "London killzone"
+    elif kz_ny:
+        sesion = "NY killzone (apertura)"
+    elif rth:
+        sesion = "RTH (sesión NY)"
+    elif hm < 570:
+        sesion = "pre-market"
+    else:
+        sesion = "after-hours / fuera de sesión"
+    return {
+        "hora_ny": now.strftime("%H:%M"),
+        "dia": _DIAS[dow],
+        "sesion": sesion,
+        "killzone_london": kz_london,
+        "killzone_ny": kz_ny,
+        "rth": rth,
+    }
 
 
 def _ema(values: list[float], period: int):
@@ -155,5 +190,6 @@ def preparar_contexto(raw: dict, modo: str = "scalping") -> dict:
             "ultimas_barras": bars,
         }
     ctx["timeframes"] = nuevos
+    ctx["sesion_ny"] = _sesion_ny()
     _enriquecer_order_flow(ctx, raw)
     return ctx

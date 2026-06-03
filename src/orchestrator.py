@@ -6,6 +6,7 @@ Motor agnóstico de proveedor. El proveedor + la API key pueden venir:
 """
 import asyncio
 import json
+import os
 import re
 from pathlib import Path
 
@@ -35,10 +36,11 @@ def _parse_json(raw: str) -> dict:
         return {"error": f"JSON inválido: {e}", "raw": raw}
 
 
-async def _run_agent(persona: dict, user_prompt: str, model: str, api_key: str | None) -> dict:
+async def _run_agent(persona: dict, user_prompt: str, model: str, api_key: str | None,
+                     api_base: str | None = None) -> dict:
     """Corre un agente: su system prompt (esencia) + el contexto -> JSON parseado."""
     async with _SEM:
-        raw = await complete(persona["prompt"], user_prompt, model, api_key=api_key)
+        raw = await complete(persona["prompt"], user_prompt, model, api_key=api_key, api_base=api_base)
     return _parse_json(raw)
 
 
@@ -63,7 +65,8 @@ def _prompt_jefe(par: str, veredictos: list[dict], noticias: dict) -> str:
     )
 
 
-async def _noticias(par: str, fecha: str, forzar: bool, model: str, api_key: str | None) -> dict:
+async def _noticias(par: str, fecha: str, forzar: bool, model: str, api_key: str | None,
+                    api_base: str | None = None) -> dict:
     if not news_cache.needs_refresh(fecha, par, force=forzar):
         return news_cache.get(fecha, par)
 
@@ -75,7 +78,7 @@ async def _noticias(par: str, fecha: str, forzar: bool, model: str, api_key: str
         "(régimen, calendario, sorpresas de hoy) y devuelve tu JSON.\n\n"
         f"Resultados de búsqueda web reciente:\n{web}"
     )
-    payload = await _run_agent(persona, prompt, model, api_key)
+    payload = await _run_agent(persona, prompt, model, api_key, api_base)
     news_cache.set_entry(fecha, par, payload, timestamp=fecha)
     return payload
 
@@ -95,13 +98,18 @@ async def analizar(par: str, contexto: dict, fecha: str,
     if model_jefe:
         mj = model_jefe
 
-    noticias = await _noticias(par, fecha, forzar_noticias, mt, api_key)
+    # claudecli enruta al puente local (suscripción); LiteLLM honra api_base con el prefijo openai/.
+    api_base = None
+    if (provider or "").lower() == "claudecli":
+        api_base = os.getenv("LLM_API_BASE") or "http://127.0.0.1:8788/v1"
+
+    noticias = await _noticias(par, fecha, forzar_noticias, mt, api_key, api_base)
 
     prompt_t = _prompt_trader(par, contexto, noticias)
-    veredictos = await asyncio.gather(*[_run_agent(t, prompt_t, mt, api_key) for t in traders])
+    veredictos = await asyncio.gather(*[_run_agent(t, prompt_t, mt, api_key, api_base) for t in traders])
 
     jefe = load_persona(BASE / "agents" / "orchestrator" / "jefe-ia.md")
-    decision = await _run_agent(jefe, _prompt_jefe(par, list(veredictos), noticias), mj, api_key)
+    decision = await _run_agent(jefe, _prompt_jefe(par, list(veredictos), noticias), mj, api_key, api_base)
 
     return {
         "par": par,

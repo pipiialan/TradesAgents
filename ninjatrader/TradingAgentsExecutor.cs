@@ -28,6 +28,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 
         private string lastOrderId = "";
         private DateTime lastCheck = DateTime.MinValue;
+        private double startUnix;   // hora (epoch seg) en que la estrategia entro a realtime
 
         private bool pend;
         private string pId = "", pAccion = "", pTipo = "";
@@ -47,6 +48,10 @@ namespace NinjaTrader.NinjaScript.Strategies
                 IsExitOnSessionCloseStrategy = false;
                 OrderFile                    = @"e:\Bots trading\RESURECCIONDEPAQUITA\TradesAgents\data\order_request.json";
                 VelasVida                    = 15;
+            }
+            else if (State == State.Realtime)
+            {
+                startUnix = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
             }
         }
 
@@ -89,6 +94,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 
                 string id = GetStr(json, "id");
                 if (string.IsNullOrEmpty(id) || id == lastOrderId) return;
+
+                // Ignorar ordenes VIEJAS (creadas antes de arrancar la estrategia).
+                double idNum;
+                if (double.TryParse(id, NumberStyles.Any, CultureInfo.InvariantCulture, out idNum) && idNum > 0 && idNum < startUnix - 5)
+                {
+                    lastOrderId = id;
+                    return;
+                }
 
                 string par = GetStr(json, "par");
                 if (!string.IsNullOrEmpty(par) && !string.Equals(par, Instrument.MasterInstrument.Name, StringComparison.OrdinalIgnoreCase))

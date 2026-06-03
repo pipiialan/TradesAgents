@@ -75,6 +75,61 @@ def _adx(bars: list[dict], period: int = 14):
     return round(adx, 1)
 
 
+def _poc_vah_val(por_nivel: dict):
+    """POC + value area (70% del volumen) desde el mapa precio->volumen del exporter."""
+    if not por_nivel:
+        return None
+    levels = sorted(((float(p), float(v)) for p, v in por_nivel.items()), key=lambda x: x[0])
+    if not levels:
+        return None
+    total = sum(v for _, v in levels)
+    poc_i = max(range(len(levels)), key=lambda i: levels[i][1])
+    target, acc, lo, hi = total * 0.70, levels[poc_i][1], poc_i, poc_i
+    while acc < target and (lo > 0 or hi < len(levels) - 1):
+        v_lo = levels[lo - 1][1] if lo > 0 else -1
+        v_hi = levels[hi + 1][1] if hi < len(levels) - 1 else -1
+        if v_hi >= v_lo:
+            hi += 1; acc += levels[hi][1]
+        else:
+            lo -= 1; acc += levels[lo][1]
+    return {"poc": round(levels[poc_i][0], 2), "vah": round(levels[hi][0], 2), "val": round(levels[lo][0], 2)}
+
+
+def _divergencia(of_1m: list, bars_1m: list):
+    """Compara la tendencia reciente del precio vs el CVD (últimas ~10 velas de 1m)."""
+    n = min(10, len(of_1m or []), len(bars_1m or []))
+    if n < 4:
+        return "ninguna"
+    closes = [b["c"] for b in bars_1m[-n:]]
+    cvds = [r.get("cd", 0) for r in of_1m[-n:]]
+    sube_precio, sube_cvd = closes[-1] > closes[0], cvds[-1] > cvds[0]
+    if sube_precio and not sube_cvd:
+        return "bajista (precio sube pero CVD baja)"
+    if not sube_precio and sube_cvd:
+        return "alcista (precio baja pero CVD sube)"
+    return "ninguna"
+
+
+def _enriquecer_order_flow(ctx: dict, raw: dict) -> None:
+    """Adjunta order_flow (delta/CVD/divergencia) y volume_profile (POC/VAH/VAL) si vienen del exporter."""
+    of = raw.get("order_flow")
+    if of:
+        of_1m = (of.get("1m") or [])[-30:]
+        of_5m = (of.get("5m") or [])[-12:]
+        bars_1m = ctx.get("timeframes", {}).get("1m", {}).get("ultimas_barras", [])
+        ctx["order_flow"] = {
+            "nota": of.get("nota", "delta desde trades ejecutados (Level 1), no DOM"),
+            "cvd_sesion": of.get("cvd_sesion"),
+            "divergencia_1m": _divergencia(of_1m, bars_1m),
+            "1m": of_1m,
+            "5m": of_5m,
+        }
+    vp = (raw.get("volume_profile") or {}).get("por_nivel")
+    pvv = _poc_vah_val(vp) if vp else None
+    if pvv:
+        ctx["volume_profile"] = pvv
+
+
 def preparar_contexto(raw: dict, modo: str = "scalping") -> dict:
     """Recorta por modo y agrega indicadores calculados por TF."""
     modo = modo if modo in WINDOWS else "scalping"
@@ -100,4 +155,5 @@ def preparar_contexto(raw: dict, modo: str = "scalping") -> dict:
             "ultimas_barras": bars,
         }
     ctx["timeframes"] = nuevos
+    _enriquecer_order_flow(ctx, raw)
     return ctx

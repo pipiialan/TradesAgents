@@ -34,6 +34,8 @@ class OrdenReq(BaseModel):
     par: str
     direccion: str            # LONG | SHORT | FLAT
     qty: int = 1
+    tipo: str = "MARKET"      # MARKET | LIMIT | STOP
+    entrada: float | None = None   # precio para LIMIT/STOP (null = market)
     sl: float | None = None
     tp: float | None = None
     cuenta: str = "Sim101"
@@ -84,15 +86,19 @@ async def ejecutar_ep(req: OrdenReq):
     if req.direccion.upper() not in ("LONG", "SHORT", "FLAT"):
         return JSONResponse({"error": "dirección inválida"}, status_code=400)
 
+    tipo = req.tipo.upper()
+    if tipo not in ("MARKET", "LIMIT", "STOP"):
+        tipo = "MARKET"
     orden = {
         "id": str(time.time()),
         "accion": req.direccion.upper(),
         "par": req.par,
         "qty": max(1, req.qty),
+        "tipo": tipo,
+        "entrada": req.entrada,
         "sl": req.sl,
         "tp": req.tp,
         "cuenta": req.cuenta,
-        "tipo": "MARKET",
     }
     # GATE server-side: sin confirmado=True NO se escribe nada para NinjaTrader.
     # Asi un POST directo (curl, otro cliente) tampoco puede disparar la orden.

@@ -16,7 +16,8 @@ Recibes los veredictos JSON de los 6 traders del pool correspondiente al par (í
 1. Cuenta cuántos traders dan señal y en qué dirección (LONG vs SHORT vs NO-TRADE).
 2. Aplica el FILTRO DE NOTICIAS: si el analista marca una ventana de no-trade activa (ej. CPI en 30 min), degrada la convicción o marca ESPERAR. Si el sesgo de noticias contradice fuerte la dirección mayoritaria, bájale la convicción.
 3. Calcula la confianza promedio ponderada de los que están a favor de la dirección dominante.
-4. Define la zona de entrada (rango entre las entradas propuestas), el SL más conservador (más ajustado que proteja) y un TP con R:R mínimo 1:1.5.
+4. Define la zona de entrada (rango), el SL más conservador y un TP con R:R mínimo 1:1.5.
+5. Define el TIPO DE ORDEN y el PRECIO de entrada según los traders que COINCIDEN: si la mayoría de los que operan proponen LIMIT en una zona, usa "LIMIT" y un precio concreto (promedio de sus entradas); si proponen ruptura, "STOP" y el precio; si es entrada inmediata por flujo/confirmación, "MARKET". El campo "entrada" debe ser UN número exacto (no un rango). Si la convicción es SIN-SETUP/ESPERAR, deja tipo_orden y entrada en null.
 </proceso>
 
 <reglas_consenso>
@@ -35,6 +36,8 @@ Devuelve SIEMPRE este JSON. Nada de texto fuera del JSON:
   "direccion": "LONG | SHORT | NINGUNA",
   "votos": {"long": <n>, "short": <n>, "no_trade": <n>},
   "zona_entrada": "<rango de precio o null>",
+  "tipo_orden": "LIMIT | MARKET | STOP | null",
+  "entrada": <precio exacto para la orden, o null>,
   "sl": <precio o null>,
   "tp": <precio o null>,
   "rr": <número o null>,

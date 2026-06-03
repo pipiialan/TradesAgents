@@ -76,7 +76,9 @@ namespace NinjaTrader.NinjaScript.Strategies
                 }
 
                 string accion = GetStr(json, "accion");
+                string tipo = GetStr(json, "tipo");            // MARKET | LIMIT | STOP
                 int qty = (int)GetNum(json, "qty", 1);
+                double entrada = GetNum(json, "entrada", 0);
                 double sl = GetNum(json, "sl", 0);
                 double tp = GetNum(json, "tp", 0);
                 lastOrderId = id;
@@ -84,15 +86,22 @@ namespace NinjaTrader.NinjaScript.Strategies
                 if (sl > 0) SetStopLoss(CalculationMode.Price, sl);
                 if (tp > 0) SetProfitTarget(CalculationMode.Price, tp);
 
+                bool conPrecio = (tipo == "LIMIT" || tipo == "STOP") && entrada > 0;
+                string det = " " + tipo + (conPrecio ? (" @ " + entrada) : "");
+
                 if (accion == "LONG")
                 {
-                    EnterLong(qty, "TA_Long");
-                    WriteStatus(id, "EJECUTADA", "LONG " + qty + " @ market");
+                    if (tipo == "LIMIT" && entrada > 0) EnterLongLimit(qty, entrada, "TA_Long");
+                    else if (tipo == "STOP" && entrada > 0) EnterLongStopMarket(qty, entrada, "TA_Long");
+                    else EnterLong(qty, "TA_Long");
+                    WriteStatus(id, "EJECUTADA", "LONG " + qty + det);
                 }
                 else if (accion == "SHORT")
                 {
-                    EnterShort(qty, "TA_Short");
-                    WriteStatus(id, "EJECUTADA", "SHORT " + qty + " @ market");
+                    if (tipo == "LIMIT" && entrada > 0) EnterShortLimit(qty, entrada, "TA_Short");
+                    else if (tipo == "STOP" && entrada > 0) EnterShortStopMarket(qty, entrada, "TA_Short");
+                    else EnterShort(qty, "TA_Short");
+                    WriteStatus(id, "EJECUTADA", "SHORT " + qty + det);
                 }
                 else if (accion == "FLAT")
                 {

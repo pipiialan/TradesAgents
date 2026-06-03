@@ -9,9 +9,16 @@ using NinjaTrader.NinjaScript;
 
 // ESTRATEGIA ejecutora para la app TradingAgents.
 // Lee data\order_request.json (que escribe la app) y coloca la orden en su cuenta.
-// MARKET = inmediata. LIMIT/STOP = se mantiene viva (re-enviada cada vela) hasta
-// llenarse o expirar (~15 velas), porque NinjaTrader cancela las limit administradas
-// al cierre de cada vela si no se re-envian. SL/TP se adjuntan al llenarse la entrada.
+//
+// MARKET = inmediata.
+// LIMIT/STOP = se envia UNA SOLA VEZ con el overload avanzado isLiveUntilCancelled=true,
+//   de modo que NO se cancela al cierre de barra y permanece viva hasta llenarse o hasta
+//   que la cancelemos por vigencia (vigencia_min velas de 1m). NO se re-envia cada vela
+//   (re-enviar con el mismo signalName MODIFICA la orden y, en el borde del fill, la
+//   cancela/recrea -> deja el bracket SL/TP huerfano: ese era el bug).
+// SL/TP = se arman UNA sola vez ANTES de la entrada con SetStopLoss/SetProfitTarget y el
+//   mismo fromEntrySignal que la entrada; NinjaTrader los adjunta como par OCO en cuanto
+//   la entrada se llena, sin importar el timing de ticks/velas -> nunca posicion sin stop.
 // SEGURIDAD: solo ejecuta si la cuenta de la orden coincide con la de la estrategia.
 // La ruta default apunta a la PC de casa; ajustala en las propiedades segun la PC.
 namespace NinjaTrader.NinjaScript.Strategies
@@ -30,23 +37,27 @@ namespace NinjaTrader.NinjaScript.Strategies
         private DateTime lastCheck = DateTime.MinValue;
         private double startUnix;   // hora (epoch seg) en que la estrategia entro a realtime
 
+        // Estado de la orden LIMIT/STOP pendiente (enviada UNA vez, viva hasta llenarse/vencer).
         private bool pend;
         private string pId = "", pAccion = "", pTipo = "";
         private int pQty;
         private double pPrecio, pSl, pTp;
-        private int pExpiraBar, pUltimaBar;
+        private int pExpiraBar;          // barra en la que vence la vigencia si no se lleno
+        private Order entryOrder;        // referencia a la orden de entrada (asignada en OnOrderUpdate)
+        private string pSignal = "";     // signalName ESTABLE de la entrada/salidas para esta orden
+        private bool slTpArmado;         // SL/TP ya armados para la entrada actual
 
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
             {
                 Name                         = "TradingAgentsExecutor";
-                Description                  = "Ejecuta ordenes de la app TradingAgents (MARKET inmediata, LIMIT/STOP viva hasta llenarse).";
+                Description                  = "Ejecuta ordenes de la app TradingAgents (MARKET inmediata, LIMIT/STOP viva hasta llenarse, SL/TP OCO garantizado).";
                 Calculate                    = Calculate.OnEachTick;
                 EntriesPerDirection          = 1;
                 EntryHandling                = EntryHandling.AllEntries;
                 IsExitOnSessionCloseStrategy = false;
-                OrderFile                    = @"e:\Bots trading\RESURECCIONDEPAQUITA\TradesAgents\data\order_request.json";
+                OrderFile                    = @"C:\Users\Soles\Documents\TradingAgents\data\order_request.json";
                 VelasVida                    = 15;
             }
             else if (State == State.Realtime)
@@ -59,27 +70,28 @@ namespace NinjaTrader.NinjaScript.Strategies
         {
             if (State != State.Realtime) return;
 
-            if (pend)
+            // 1) Vigencia de la entrada pendiente: si NO se lleno y la orden sigue Working
+            //    cuando se acaba la vigencia, la cancelamos EXPLICITAMENTE (no se cancela sola
+            //    porque va con isLiveUntilCancelled). No re-enviamos nada aqui.
+            if (pend && CurrentBar >= pExpiraBar)
             {
-                bool lleno = (pAccion == "LONG"  && Position.MarketPosition == MarketPosition.Long)
-                          || (pAccion == "SHORT" && Position.MarketPosition == MarketPosition.Short);
-                if (lleno)
+                if (entryOrder != null && (entryOrder.OrderState == OrderState.Working
+                                        || entryOrder.OrderState == OrderState.Accepted
+                                        || entryOrder.OrderState == OrderState.Submitted))
                 {
-                    pend = false;
-                    WriteStatus(pId, "LLENADA", pAccion + " " + pQty + " @ " + pPrecio);
+                    CancelOrder(entryOrder);
+                    // El estado EXPIRADA se confirma en OnOrderUpdate al pasar a Cancelled.
                 }
-                else if (CurrentBar >= pExpiraBar)
+                else if (entryOrder == null)
                 {
+                    // No tenemos referencia (caso raro): marcamos vencida y limpiamos plantillas.
                     pend = false;
+                    ResetSalidas();
                     WriteStatus(pId, "EXPIRADA", "no se lleno la " + pTipo + " a tiempo (vigencia agotada)");
-                }
-                else if (CurrentBar != pUltimaBar)
-                {
-                    pUltimaBar = CurrentBar;
-                    Submit();
                 }
             }
 
+            // 2) Revisar si llego una orden nueva (cada ~2s).
             if ((DateTime.Now - lastCheck).TotalSeconds < 2) return;
             lastCheck = DateTime.Now;
             CheckOrder();
@@ -107,7 +119,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                 if (!string.IsNullOrEmpty(par) && !string.Equals(par, Instrument.MasterInstrument.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     lastOrderId = id;
-                    return;
+                    return;   // no es mi instrumento
                 }
 
                 string cuenta = GetStr(json, "cuenta");
@@ -129,49 +141,147 @@ namespace NinjaTrader.NinjaScript.Strategies
 
                 if (accion == "FLAT")
                 {
+                    // Cancelar cualquier entrada pendiente, cerrar posicion y limpiar plantillas.
+                    if (entryOrder != null && (entryOrder.OrderState == OrderState.Working
+                                            || entryOrder.OrderState == OrderState.Accepted
+                                            || entryOrder.OrderState == OrderState.Submitted))
+                        CancelOrder(entryOrder);
                     pend = false;
+                    entryOrder = null;
                     if (Position.MarketPosition == MarketPosition.Long) ExitLong();
                     else if (Position.MarketPosition == MarketPosition.Short) ExitShort();
+                    ResetSalidas();
                     WriteStatus(id, "EJECUTADA", "FLAT");
                     return;
                 }
 
                 if ((tipo == "LIMIT" || tipo == "STOP") && entrada > 0 && (accion == "LONG" || accion == "SHORT"))
                 {
+                    // Si ya hay una entrada pendiente, cancelarla antes de colocar la nueva.
+                    if (pend && entryOrder != null && (entryOrder.OrderState == OrderState.Working
+                                                    || entryOrder.OrderState == OrderState.Accepted
+                                                    || entryOrder.OrderState == OrderState.Submitted))
+                        CancelOrder(entryOrder);
+
                     int velasVida = vigencia > 0 ? (int)vigencia : VelasVida;   // vigencia (min) = velas en grafico 1m
+                    if (velasVida < 1) velasVida = 1;                           // nunca expirar en la misma barra del envio
+
                     pId = id; pAccion = accion; pTipo = tipo; pQty = qty; pPrecio = entrada; pSl = sl; pTp = tp;
+                    pSignal = (accion == "LONG" ? "TA_Long_" : "TA_Short_") + id;   // signalName ESTABLE por orden
                     pExpiraBar = CurrentBar + velasVida;
-                    pUltimaBar = -1;
+                    entryOrder = null;
                     pend = true;
+
+                    // Enviar la entrada UNA sola vez (con SL/TP armados antes).
                     Submit();
-                    WriteStatus(id, "COLOCADA", accion + " " + qty + " " + tipo + " @ " + entrada + " (vigencia " + velasVida + " min, esperando llenado)");
+
+                    WriteStatus(id, "COLOCADA", accion + " " + qty + " " + tipo + " @ " + Num(entrada) + " (vigencia " + velasVida + " min, esperando llenado)");
                 }
                 else if (accion == "LONG" || accion == "SHORT")
                 {
-                    if (sl > 0) SetStopLoss(CalculationMode.Price, sl);
-                    if (tp > 0) SetProfitTarget(CalculationMode.Price, tp);
-                    if (accion == "LONG") EnterLong(qty, "TA_Long");
-                    else EnterShort(qty, "TA_Short");
+                    // MARKET inmediata. SL/TP armados antes de entrar -> OCO automatico al llenarse.
+                    ResetSalidas();
+                    pSignal = (accion == "LONG" ? "TA_Long_" : "TA_Short_") + id;
+                    if (sl > 0) { SetStopLoss(pSignal, CalculationMode.Price, sl, false); }
+                    if (tp > 0) { SetProfitTarget(pSignal, CalculationMode.Price, tp); }
+                    slTpArmado = (sl > 0 || tp > 0);
+                    if (accion == "LONG") EnterLong(qty, pSignal);
+                    else EnterShort(qty, pSignal);
                     pend = false;
+                    entryOrder = null;
                     WriteStatus(id, "EJECUTADA", accion + " " + qty + " MARKET");
                 }
             }
             catch (Exception ex) { Print("TradingAgentsExecutor error: " + ex.Message); }
         }
 
+        // Envia la entrada LIMIT/STOP UNA sola vez:
+        //  - arma SL/TP ANTES (asociados por fromEntrySignal = pSignal) para que NinjaTrader
+        //    los adjunte como OCO en cuanto la entrada se llene (timing-independiente).
+        //  - usa el overload avanzado isLiveUntilCancelled=true -> la orden NO expira al
+        //    cierre de barra; vive hasta llenarse o hasta que la cancelemos por vigencia.
         private void Submit()
         {
-            if (pSl > 0) SetStopLoss(CalculationMode.Price, pSl);
-            if (pTp > 0) SetProfitTarget(CalculationMode.Price, pTp);
+            ResetSalidas();
+            if (pSl > 0) { SetStopLoss(pSignal, CalculationMode.Price, pSl, false); }
+            if (pTp > 0) { SetProfitTarget(pSignal, CalculationMode.Price, pTp); }
+            slTpArmado = (pSl > 0 || pTp > 0);
+
             if (pAccion == "LONG")
             {
-                if (pTipo == "STOP") EnterLongStopMarket(pQty, pPrecio, "TA_Long");
-                else EnterLongLimit(pQty, pPrecio, "TA_Long");
+                if (pTipo == "STOP") entryOrder = EnterLongStopMarket(0, true, pQty, pPrecio, pSignal);
+                else                 entryOrder = EnterLongLimit(0, true, pQty, pPrecio, pSignal);
             }
             else
             {
-                if (pTipo == "STOP") EnterShortStopMarket(pQty, pPrecio, "TA_Short");
-                else EnterShortLimit(pQty, pPrecio, "TA_Short");
+                if (pTipo == "STOP") entryOrder = EnterShortStopMarket(0, true, pQty, pPrecio, pSignal);
+                else                 entryOrder = EnterShortLimit(0, true, pQty, pPrecio, pSignal);
+            }
+        }
+
+        // Resetea las plantillas SetStopLoss/SetProfitTarget para que la PROXIMA entrada
+        // NO herede niveles viejos (los Set conservan su valor entre entradas en managed).
+        private void ResetSalidas()
+        {
+            if (!slTpArmado) return;
+            try
+            {
+                SetStopLoss(CalculationMode.Price, 0);
+                SetProfitTarget(CalculationMode.Price, 0);
+            }
+            catch { }
+            slTpArmado = false;
+        }
+
+        // Seguimiento fiable del ciclo de vida de la entrada (la doc recomienda asignar/
+        // verificar la Order aqui, NO en OnBarUpdate justo tras el Submit).
+        protected override void OnOrderUpdate(Order order, double limitPrice, double stopPrice,
+            int quantity, int filled, double averageFillPrice, OrderState orderState, DateTime time,
+            ErrorCode error, string nativeError)
+        {
+            if (string.IsNullOrEmpty(pSignal) || order == null) return;
+            if (order.FromEntrySignal != pSignal) return;   // solo la entrada de esta orden
+
+            // Asegurar/refrescar la referencia a la orden de entrada.
+            entryOrder = order;
+
+            if (orderState == OrderState.Cancelled && pend)
+            {
+                // Cancelacion por vigencia (o cancelacion previa al reemplazo): confirmar EXPIRADA
+                // solo si NO se lleno (sin posicion en la direccion esperada).
+                bool lleno = (pAccion == "LONG"  && Position.MarketPosition == MarketPosition.Long)
+                          || (pAccion == "SHORT" && Position.MarketPosition == MarketPosition.Short);
+                if (!lleno && filled == 0)
+                {
+                    pend = false;
+                    entryOrder = null;
+                    ResetSalidas();
+                    WriteStatus(pId, "EXPIRADA", "no se lleno la " + pTipo + " a tiempo (vigencia agotada)");
+                }
+            }
+            else if (orderState == OrderState.Rejected)
+            {
+                pend = false;
+                entryOrder = null;
+                ResetSalidas();
+                WriteStatus(pId, "RECHAZADA", "entrada " + pTipo + " rechazada: " + nativeError);
+            }
+        }
+
+        // Deteccion robusta del LLENADO: cuando la EJECUCION corresponde a la orden de entrada
+        // y ya esta Filled, el bracket SL/TP (armado antes) queda adjuntado como OCO a la
+        // posicion real. Reportamos LLENADA aqui (no por Position en OnBarUpdate).
+        protected override void OnExecutionUpdate(Execution execution, string executionId, double price,
+            int quantity, MarketPosition marketPosition, string orderId, DateTime time)
+        {
+            if (string.IsNullOrEmpty(pSignal) || execution == null || execution.Order == null) return;
+            if (execution.Order.FromEntrySignal != pSignal) return;
+
+            if (pend && execution.Order.OrderState == OrderState.Filled)
+            {
+                pend = false;
+                WriteStatus(pId, "LLENADA", pAccion + " " + execution.Order.Filled + " @ " + Num(price)
+                    + " (SL=" + Num(pSl) + " TP=" + Num(pTp) + " OCO)");
             }
         }
 
@@ -184,6 +294,13 @@ namespace NinjaTrader.NinjaScript.Strategies
                 File.WriteAllText(Path.Combine(dir, "order_status.json"), s);
             }
             catch { }
+        }
+
+        // Formatea numeros SIEMPRE con punto decimal (InvariantCulture) para no romper el
+        // JSON del lado app en culturas con coma decimal (es-ES/es-MX).
+        private string Num(double v)
+        {
+            return v.ToString(CultureInfo.InvariantCulture);
         }
 
         private string GetStr(string json, string key)

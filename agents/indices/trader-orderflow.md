@@ -41,8 +41,8 @@ Modo por defecto: MARKET reactivo al confirmar la absorción. Como alternativa, 
 </gestion>
 
 <no_operar>
-- Baja liquidez o flujo ambiguo.
-- Hora de lunch (12:00-14:00 ET).
+- Flujo ambiguo (CVD sin dirección clara).
+- (Lunch 12:00-14:00 ET: NO bloquea; opera con confianza más baja, el flujo es más flojo.)
 Si no hay setup válido, devuelves NO-TRADE con el motivo.
 </no_operar>
 

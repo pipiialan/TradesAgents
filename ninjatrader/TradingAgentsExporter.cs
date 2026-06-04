@@ -132,7 +132,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             sb.AppendFormat("\"precio_actual\":{0},", F(Closes[7][0]));
 
             sb.Append("\"timeframes\":{");
-            sb.Append("\"1m\":{\"ultimas_barras\":");  AppendBars(sb, 7, 120); sb.Append("},");
+            sb.Append("\"1m\":{\"ultimas_barras\":");  AppendBars(sb, 7, 150); sb.Append("},");
             sb.Append("\"5m\":{\"ultimas_barras\":");  AppendBars(sb, 1, 160); sb.Append("},");
             sb.Append("\"15m\":{\"ultimas_barras\":"); AppendBars(sb, 2, 200); sb.Append("},");
             sb.Append("\"30m\":{\"ultimas_barras\":"); AppendBars(sb, 5, 240); sb.Append("},");
@@ -166,7 +166,8 @@ namespace NinjaTrader.NinjaScript.Indicators
             int n = Math.Min(maxBars, CurrentBars[seriesIdx] + 1);
             for (int i = n - 1; i >= 0; i--)
             {
-                sb.AppendFormat("{{\"o\":{0},\"h\":{1},\"l\":{2},\"c\":{3},\"v\":{4}}}",
+                sb.AppendFormat("{{\"t\":{0},\"o\":{1},\"h\":{2},\"l\":{3},\"c\":{4},\"v\":{5}}}",
+                    ((DateTimeOffset)DateTime.SpecifyKind(Times[seriesIdx][i], DateTimeKind.Utc)).ToUnixTimeSeconds(),
                     F(Opens[seriesIdx][i]), F(Highs[seriesIdx][i]), F(Lows[seriesIdx][i]), F(Closes[seriesIdx][i]), F(Volumes[seriesIdx][i]));
                 if (i > 0) sb.Append(",");
             }

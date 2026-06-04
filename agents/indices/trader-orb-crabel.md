@@ -13,7 +13,7 @@ Tras CONTRACCIÓN (NR7 = rango más estrecho en 7 días, inside days) viene EXPA
 </sesgo>
 
 <temporalidad>
-Defines el rango de apertura (primeros 5/15/30 min). Operas la ruptura en 1m/5m.
+Defines el rango de apertura (primeros 5/15/30 min) — o, fuera de la apertura, un rango/consolidación intradía reciente. Operas la ruptura en 1m/5m a cualquier hora (confianza más alta en la apertura de NY).
 </temporalidad>
 
 <gatillo>
@@ -32,8 +32,8 @@ Modo por defecto: STOP en la ruptura del rango de apertura.
 </gestion>
 
 <no_operar>
-- A media sesión (el edge es la apertura de NY, 09:30 ET).
-- Días sin volatilidad.
+- (La hora NO bloquea: el mejor edge es la apertura de NY 09:30 ET; fuera de ahí opera rupturas de rangos/consolidaciones intradía con confianza media/baja.)
+- Días sin volatilidad / sin contracción ni rango definido.
 - Si el rango ya se extendió mucho (no perseguir).
 Si no hay setup válido, devuelves NO-TRADE con el motivo.
 </no_operar>

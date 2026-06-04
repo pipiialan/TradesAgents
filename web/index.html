@@ -175,6 +175,9 @@ async function analizar() {
     modo: document.getElementById('modo').value,
   };
   if (!esCli && !body.api_key.trim()) { out.innerHTML = '<div class="err">Primero pega tu API key.</div>'; return; }
+  // Guardar la sesión para Revalidar (no re-corre los traders, solo al Jefe).
+  window._provider = prov; window._apikey = body.api_key;
+  window._modelJefe = body.model_jefe; window._modo = body.modo;
   out.innerHTML = ''; spin.style.display = 'block'; btn.disabled = true;
   try {
     const r = await fetch('/analizar', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -206,8 +209,19 @@ function render(d) {
           </select></div>
         <div><label>Cantidad (micros)</label><input id="qty" type="number" value="1" min="1"></div>
       </div>
-      <button style="background:${dir === 'LONG' ? '#1f6feb' : '#da3633'}" onclick="ejecutarOrden('${dir}')">⚡ Ejecutar ${dir} en NinjaTrader</button>
-      <div class="hint">Orden ${dir} ${j.tipo_orden || 'MARKET'}${j.entrada ? ' @ ' + j.entrada : ''} · SL ${j.sl ?? '—'} / TP ${j.tp ?? '—'}${j.vigencia_min ? ' · vigencia ' + j.vigencia_min + ' min' : ''}. Te pedirá confirmación.</div>
+      <div class="row">
+        <div><label>Tipo</label><select id="o_tipo"><option>MARKET</option><option>LIMIT</option><option>STOP</option></select></div>
+        <div><label>Entrada <span class="hint">(vacío = mercado)</span></label><input id="o_entrada" type="number" step="any" placeholder="mercado"></div>
+        <div><label>Vigencia (min)</label><input id="o_vig" type="number" min="1"></div>
+      </div>
+      <div class="row">
+        <div><label>Stop Loss</label><input id="o_sl" type="number" step="any"></div>
+        <div><label>Take Profit</label><input id="o_tp" type="number" step="any"></div>
+      </div>
+      <div class="meta kv" id="precLine" style="margin-top:10px">Precio actual: cargando… <span style="cursor:pointer;color:#58a6ff" onclick="updatePrecio()">↻</span></div>
+      <button id="btnReval" style="background:#6e40c9" onclick="revalidarOrden()">🔄 Revalidar con el Jefe (con el precio actual)</button>
+      <button style="background:${dir === 'LONG' ? '#1f6feb' : '#da3633'}" onclick="ejecutarOrden()">⚡ Ejecutar ${dir} en NinjaTrader</button>
+      <div class="hint">Podés editar entrada/SL/TP antes de ejecutar. Al ejecutar se verifica el precio actual y te pedirá confirmación.</div>
     </div>`;
   }
 
@@ -216,16 +230,20 @@ function render(d) {
     <div class="dir">${j.direccion || ''} ${(j.tipo_orden && j.tipo_orden !== 'null') ? '· ' + j.tipo_orden : ''} ${j.entrada ? '@ ' + j.entrada : (j.zona_entrada ? '· ' + j.zona_entrada : '')}</div>
     <div class="meta" style="margin-top:8px">SL: ${j.sl ?? '—'} · TP: ${j.tp ?? '—'} · R:R ${j.rr ?? '—'} · riesgo sugerido ${j.riesgo_sugerido_pct ?? '—'}%</div>
   </div>
+  ${d._revalidado ? '<div class="meta" style="margin:4px 0 8px;color:#a371f7">🔄 Plan revalidado con el precio actual</div>' : ''}
   <div class="kv">${j.resumen || ''}</div>
   <div class="meta kv">📰 ${j.filtro_noticias || ''}</div>${exec}</div>`;
 
   html += `<div class="panel"><div class="meta" style="margin-bottom:10px">Veredictos de los traders (${d.par} · ${d.pool}) · modelos: ${d.modelos ? d.modelos.equipo + ' / ' + d.modelos.jefe : ''}</div><div class="grid">`;
   (d.veredictos || []).forEach(v => {
     const ver = v.veredicto || (v.error ? 'ERROR' : '—');
-    html += `<div class="card"><div class="t">${v.trader || '?'}</div>
+    const bot = v.es_bot;
+    const style = bot ? ' style="border-color:#a371f7;box-shadow:0 0 0 1px #a371f7"' : '';
+    const titulo = bot ? '🤖 SMC V2 · bot (más peso)' : (v.trader || '?');
+    html += `<div class="card"${style}><div class="t">${titulo}</div>
       <div class="v ${ver}">${ver}</div>
       <div class="meta kv">entrada ${v.entrada ?? '—'} (${v.tipo_orden ?? '—'})</div>
-      <div class="meta kv">SL ${v.sl ?? '—'} · TP ${v.tp ?? '—'}</div>
+      <div class="meta kv">SL ${v.sl ?? '—'} · TP ${v.tp ?? '—'}${v.rr ? ' · RR ' + v.rr : ''}</div>
       <div class="meta kv">conf. ${v.confianza ?? '—'}/10</div>
       <div class="razon">${(v.razon || '').slice(0, 240)}</div></div>`;
   });
@@ -238,24 +256,112 @@ function render(d) {
     <pre>${JSON.stringify(d, null, 2)}</pre></details></div>`;
 
   document.getElementById('out').innerHTML = html;
+
+  // Guardar para Revalidar / chequeo de precio, e inicializar los campos editables.
+  window._lastData = d;
+  window._dir = dir;
+  window._precioAnalisis = (d.precio_analisis ?? window._precioAnalisis ?? null);
+  window._veredictos = d.veredictos || [];
+  window._noticias = d.noticias || {};
+  if (dir === 'LONG' || dir === 'SHORT') { _initExecFields(); updatePrecio(); }
 }
 
-async function ejecutarOrden(dir) {
+function _initExecFields() {
   const j = window._jefe || {};
+  const setV = (id, val) => { const e = document.getElementById(id); if (e && val != null && val !== 'null') e.value = val; };
+  let tipo = (j.tipo_orden || 'MARKET').toString().toUpperCase();
+  if (!['MARKET', 'LIMIT', 'STOP'].includes(tipo)) tipo = 'MARKET';
+  const ts = document.getElementById('o_tipo'); if (ts) ts.value = tipo;
+  setV('o_entrada', (tipo === 'MARKET' ? null : j.entrada));
+  setV('o_sl', j.sl);
+  setV('o_tp', j.tp);
+  setV('o_vig', j.vigencia_min);
+}
+
+async function updatePrecio() {
+  const el = document.getElementById('precLine'); if (!el) return;
+  try {
+    const r = await fetch('/precio?par=' + encodeURIComponent(window._par));
+    const p = await r.json();
+    const pa = window._precioAnalisis;
+    if (!p.vivo || p.precio == null) {
+      el.innerHTML = '⚠️ Sin precio en vivo de NinjaTrader (no se puede verificar). <span style="cursor:pointer;color:#58a6ff" onclick="updatePrecio()">↻</span>';
+      return;
+    }
+    const mov = (pa != null) ? (p.precio - pa) : null;
+    let movTxt = '';
+    if (mov != null) {
+      const c = Math.abs(mov) > 0 ? (mov > 0 ? '#3fb950' : '#f85149') : '#8b949e';
+      movTxt = ` · movió <b style="color:${c}">${mov > 0 ? '+' : ''}${mov.toFixed(2)}</b>`;
+    }
+    el.innerHTML = `Precio al analizar: <b>${pa ?? '—'}</b> · ahora: <b>${p.precio}</b>${movTxt} <span style="cursor:pointer;color:#58a6ff" onclick="updatePrecio()">↻</span>`;
+  } catch (e) { /* silencioso */ }
+}
+
+async function revalidarOrden() {
+  const btn = document.getElementById('btnReval');
+  if (btn) { btn.disabled = true; btn.textContent = '🔄 Revalidando con el Jefe…'; }
+  try {
+    const esCli = window._provider === 'claudecli';
+    const body = {
+      par: window._par,
+      provider: window._provider,
+      api_key: esCli ? 'cli' : (window._apikey || ''),
+      model_jefe: window._modelJefe || '',
+      modo: window._modo || 'scalping',
+      veredictos: window._veredictos || [],
+      noticias: window._noticias || {},
+      precio_analisis: window._precioAnalisis ?? null,
+    };
+    const r = await fetch('/revalidar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await r.json();
+    if (data.error) { alert('Error revalidando: ' + data.error); return; }
+    // Actualizar el plan con la decisión fresca del Jefe y re-renderizar.
+    if (window._lastData) {
+      window._lastData.jefe = data.jefe || window._lastData.jefe;
+      window._lastData.precio_analisis = (data.precio_actual ?? window._lastData.precio_analisis);
+      window._lastData._revalidado = true;
+      render(window._lastData);
+    }
+  } catch (e) { alert('Error de conexión: ' + e); }
+  finally {
+    const b = document.getElementById('btnReval');
+    if (b) { b.disabled = false; b.textContent = '🔄 Revalidar con el Jefe (con el precio actual)'; }
+  }
+}
+
+async function ejecutarOrden() {
+  const dir = window._dir;
   const acct = document.getElementById('acct').value;
   const qty = parseInt(document.getElementById('qty').value || '1', 10);
+  const tipo = document.getElementById('o_tipo').value;
+  const num = (id) => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? null : v; };
+  const vigRaw = parseInt(document.getElementById('o_vig').value || '', 10);
+  const base = {
+    par: window._par, direccion: dir, qty, tipo,
+    entrada: (tipo === 'MARKET' ? null : num('o_entrada')),
+    vigencia_min: isNaN(vigRaw) ? null : vigRaw,
+    sl: num('o_sl'), tp: num('o_tp'), cuenta: acct,
+    precio_analisis: window._precioAnalisis ?? null,
+  };
   const aviso = acct === 'Sim101' ? '(cuenta simulada)' : '⚠️ CUENTA REAL/EVALUACIÓN — dinero de verdad';
-  const base = { par: window._par, direccion: dir, qty, tipo: (j.tipo_orden || 'MARKET'), entrada: (j.entrada ?? null), vigencia_min: (j.vigencia_min ?? null), sl: j.sl, tp: j.tp, cuenta: acct };
   const post = (body) => fetch('/ejecutar', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }).then(r => r.json());
   try {
-    // PASO 1: preview server-side (NO escribe la orden todavía).
+    // PASO 1: preview server-side (NO escribe la orden todavía) + chequeo de precio.
     let res = await post(base);
     if (res.error) { alert('Error: ' + res.error); return; }
     if (res.requiere_confirmacion) {
       const o = res.orden || {};
-      if (!confirm(`Confirmar envío a NinjaTrader ${aviso}:\n\n${dir} ${o.qty} ${window._par} · ${o.tipo}${o.entrada ? ' @ ' + o.entrada : ' (mercado)'}${o.vigencia_min ? ' · vigencia ' + o.vigencia_min + ' min' : ''}\nCuenta: ${o.cuenta}\nSL ${o.sl ?? '—'} / TP ${o.tp ?? '—'}`)) return;
+      const adv = res.advertencias || [];
+      let advTxt = '';
+      if (adv.length) {
+        const cab = res.severidad === 'alta' ? '🚨 ALERTA DE PRECIO:' : '⚠️ Aviso de precio:';
+        advTxt = '\n\n' + cab + '\n- ' + adv.join('\n- ');
+      }
+      const msg = `Confirmar envío a NinjaTrader ${aviso}:\n\n${dir} ${o.qty} ${window._par} · ${o.tipo}${o.entrada ? ' @ ' + o.entrada : ' (mercado)'}${o.vigencia_min ? ' · vigencia ' + o.vigencia_min + ' min' : ''}\nCuenta: ${o.cuenta}\nSL ${o.sl ?? '—'} / TP ${o.tp ?? '—'}${advTxt}`;
+      if (!confirm(msg)) return;
       // PASO 2: ahora sí, con confirmado=true -> el backend escribe la orden.
       res = await post({ ...base, confirmado: true });
     }

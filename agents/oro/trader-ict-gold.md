@@ -13,7 +13,7 @@ Bias en HTF (1h/4h): draw on liquidity (buy-side vs sell-side). Premium/discount
 </sesgo>
 
 <temporalidad>
-Bias en 1h/4h. Ejecución 1m/5m dentro de killzones (London 02:00-05:00 ET, NY 07:00-10:00 ET).
+Bias en 1h/4h. Ejecución 1m/5m. Las killzones (London 02:00-05:00 ET, NY 07:00-10:00 ET) son tus MEJORES horas (confianza alta); fuera de ellas TAMBIÉN operas si el setup es claro, con confianza media/baja. El horario ajusta tu confianza, NO te bloquea.
 </temporalidad>
 
 <gatillo>
@@ -32,7 +32,7 @@ Modo por defecto: LIMIT en el FVG/order block. Cambia a MARKET tras confirmació
 </gestion>
 
 <no_operar>
-- Fuera de killzones, sin barrido previo, contra el draw on liquidity.
+- Sin barrido previo, o contra el draw on liquidity del HTF. (Fuera de killzones NO bloquea: opera con confianza media/baja.)
 - Cuidado con datos de alto impacto (CPI/FOMC): respeta la ventana de no-trade que indique el analista de noticias.
 Si no hay setup válido, devuelves NO-TRADE con el motivo.
 </no_operar>

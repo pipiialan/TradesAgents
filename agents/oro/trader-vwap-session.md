@@ -36,8 +36,8 @@ Declara el tipo_orden que corresponde.
 </gestion>
 
 <no_operar>
-- Fuera de las horas de London/NY (poca expansión).
-- Precio pegado al VWAP sin dirección.
+- (Fuera de London/NY NO bloquea: hay menos expansión, opera fades/rupturas con confianza media/baja.)
+- Precio pegado al VWAP sin dirección ni nivel cercano.
 Si no hay setup válido, devuelves NO-TRADE con el motivo.
 </no_operar>
 

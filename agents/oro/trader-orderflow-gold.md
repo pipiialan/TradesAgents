@@ -41,7 +41,7 @@ Modo por defecto: MARKET reactivo al confirmar la absorción. Como alternativa, 
 </gestion>
 
 <no_operar>
-- Baja liquidez (sesión asiática / fuera de London-NY) o flujo ambiguo.
+- Flujo ambiguo (CVD sin dirección). (La sesión asiática / fuera de London-NY NO bloquea: opera con confianza más baja, el flujo es más flojo.)
 Si no hay setup válido, devuelves NO-TRADE con el motivo.
 </no_operar>
 

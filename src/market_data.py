@@ -24,3 +24,19 @@ def get_context(par: str) -> dict:
     ctx = json.loads(stub.read_text(encoding="utf-8")) if stub.exists() else {"nota": "sin datos"}
     ctx["_fuente"] = "STUB (ejemplo, sin NinjaTrader)"
     return ctx
+
+
+def precio_actual(par: str) -> dict:
+    """Precio ACTUAL solo de datos vivos (para verificar antes de ejecutar).
+
+    Devuelve {'precio': float|None, 'timestamp': str|None, 'vivo': bool}.
+    Si no hay live_<PAR>.json (cae al stub), 'vivo' es False y 'precio' None:
+    el precio del stub es de otro instrumento, NO se debe usar para validar.
+    """
+    ctx = get_context(par)
+    vivo = str(ctx.get("_fuente", "")).startswith("NinjaTrader")
+    return {
+        "precio": ctx.get("precio_actual") if vivo else None,
+        "timestamp": ctx.get("timestamp") if vivo else None,
+        "vivo": vivo,
+    }

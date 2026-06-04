@@ -83,9 +83,10 @@ def _prompt_jefe(par: str, veredictos: list[dict], noticias: dict) -> str:
     return (
         f"Par: {par}. Agrega los veredictos de los 6 traders + el BOT SMC V2 (trader='smc-v2-bot') "
         f"y el análisis de noticias.\n"
-        "IMPORTANTE: 'smc-v2-bot' es una ESTRATEGIA PROBADA y backtesteada (rentable); PONDÉRALO CON MÁS PESO que "
-        "los demás (cuenta como ~2-3 traders). Si el bot da señal con buen RR y no la contradicen fuerte las noticias "
-        "o una mayoría clara, INCLÍNATE hacia su dirección y respeta su entrada/SL/TP (sus niveles son exactos).\n\n"
+        "Sobre 'smc-v2-bot': cuando DA SEÑAL (LONG/SHORT) con buen RR, trátala como una confirmación fuerte de su dirección "
+        "y puedes usar su entrada/SL/TP exactos (pesa un poco más que un trader normal, no más). PERO NO vetea ni domina: "
+        "si el bot dice NO-TRADE, IGNÓRALO por completo — no cuenta como voto, no baja la convicción del equipo. En ese caso "
+        "decide normal con el consenso de los 6 traders.\n\n"
         f"Veredictos:\n{json.dumps(veredictos, ensure_ascii=False, indent=2)}\n\n"
         f"Noticias:\n{json.dumps(noticias, ensure_ascii=False, indent=2)}\n\n"
         "Aplica tus reglas de consenso y filtro de noticias. Devuelve solo tu JSON final."

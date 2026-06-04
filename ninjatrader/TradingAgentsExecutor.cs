@@ -57,7 +57,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                 EntriesPerDirection          = 1;
                 EntryHandling                = EntryHandling.AllEntries;
                 IsExitOnSessionCloseStrategy = false;
-                OrderFile                    = @"C:\Users\Soles\Documents\TradingAgents\data\order_request.json";
+                OrderFile                    = @"e:\Bots trading\RESURECCIONDEPAQUITA\TradesAgents\data\order_request.json";
                 VelasVida                    = 15;
             }
             else if (State == State.Realtime)

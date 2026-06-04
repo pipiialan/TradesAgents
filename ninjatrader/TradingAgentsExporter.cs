@@ -14,6 +14,9 @@ using NinjaTrader.NinjaScript;
 // Exporta multi-TF (1m/5m/15m/30m/1h/4h/1d) + ORDER FLOW (delta/CVD/volume profile, Level 1)
 // + niveles (PDH/PDL/PDC para pivots) a un JSON que lee la app. La app recorta por modo
 // (scalping/intradia). Ruta default = PC de casa; ajustala en las propiedades segun la PC.
+// TODAS las temporalidades (incluido el 1m) salen de series DEDICADAS que el indicador pide,
+// NO de la serie del grafico: funciona en CUALQUIER temporalidad (ticks, minutos, etc) y
+// siempre manda la data correcta. El usuario no tiene que poner el grafico en 1 minuto.
 namespace NinjaTrader.NinjaScript.Indicators
 {
     public class TradingAgentsExporter : Indicator
@@ -48,6 +51,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 AddDataSeries(BarsPeriodType.Day, 1);      // index 4
                 AddDataSeries(BarsPeriodType.Minute, 30);  // index 5
                 AddDataSeries(BarsPeriodType.Minute, 240); // index 6 (4h)
+                AddDataSeries(BarsPeriodType.Minute, 1);   // index 7: 1m DEDICADO (independiente del grafico)
             }
         }
 
@@ -89,9 +93,11 @@ namespace NinjaTrader.NinjaScript.Indicators
                 bar5mDelta = 0; bar5mVol = 0;
                 return;
             }
-            if (BarsInProgress != 0) return;
+            // El 1m y el order flow se disparan con la serie 1m DEDICADA (index 7), NO con el
+            // grafico: asi salen correctos sin importar la temporalidad en que este el chart.
+            if (BarsInProgress != 7) return;
 
-            if (Bars.IsFirstBarOfSession)
+            if (BarsArray[7].IsFirstBarOfSession)
             {
                 sessionCvd = 0; of1m.Clear(); of5m.Clear(); volByPrice.Clear();
             }
@@ -99,7 +105,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (of1m.Count > 40) of1m.RemoveAt(0);
             bar1mDelta = 0; bar1mVol = 0; bar1mMax = 0; bar1mMin = 0;
 
-            if (CurrentBars[0] < 1) return;
+            if (CurrentBars[7] < 1) return;
             if (CurrentBars[1] < 0 || CurrentBars[2] < 0 || CurrentBars[3] < 0) return;
             if (CurrentBars[4] < 1) return;
 
@@ -122,11 +128,11 @@ namespace NinjaTrader.NinjaScript.Indicators
             var sb = new StringBuilder();
             sb.Append("{");
             sb.AppendFormat("\"par\":\"{0}\",", Instrument.MasterInstrument.Name);
-            sb.AppendFormat("\"timestamp\":\"{0}\",", Times[0][0].ToString("yyyy-MM-ddTHH:mm:ss"));
-            sb.AppendFormat("\"precio_actual\":{0},", F(Closes[0][0]));
+            sb.AppendFormat("\"timestamp\":\"{0}\",", Times[7][0].ToString("yyyy-MM-ddTHH:mm:ss"));
+            sb.AppendFormat("\"precio_actual\":{0},", F(Closes[7][0]));
 
             sb.Append("\"timeframes\":{");
-            sb.Append("\"1m\":{\"ultimas_barras\":");  AppendBars(sb, 0, 120); sb.Append("},");
+            sb.Append("\"1m\":{\"ultimas_barras\":");  AppendBars(sb, 7, 120); sb.Append("},");
             sb.Append("\"5m\":{\"ultimas_barras\":");  AppendBars(sb, 1, 160); sb.Append("},");
             sb.Append("\"15m\":{\"ultimas_barras\":"); AppendBars(sb, 2, 200); sb.Append("},");
             sb.Append("\"30m\":{\"ultimas_barras\":"); AppendBars(sb, 5, 240); sb.Append("},");

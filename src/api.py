@@ -42,6 +42,9 @@ class OrdenReq(BaseModel):
     tps: list | None = None        # LADDER: TPs escalonados (scale-out: un TP por escalón)
     escalones: list | None = None  # LADDER: [{"precio":x,"pct":n}] niveles de la escalera
     cuenta: str = "Sim101"
+    be_on: bool = False            # breakeven automático activado
+    be_trigger_pct: float = 1.0    # % de movimiento a favor que activa el BE
+    be_offset_pct: float = 0.3     # mover el SL a entrada + este % (ganancia bloqueada)
     precio_analisis: float | None = None  # precio al momento del análisis (para chequear drift)
     confirmado: bool = False  # gate: sin esto NO se escribe la orden para NinjaTrader
 
@@ -211,6 +214,9 @@ async def ejecutar_ep(req: OrdenReq):
             "vigencia_min": req.vigencia_min,
             "sl": req.sl,
             "cuenta": req.cuenta,
+            "be_on": req.be_on,
+            "be_trigger_pct": req.be_trigger_pct,
+            "be_offset_pct": req.be_offset_pct,
         }
         advertencias = ["Orden ESCALONADA (ladder): revisa los niveles, el SL global y los TPs antes de confirmar."]
         severidad = "media"
@@ -226,6 +232,9 @@ async def ejecutar_ep(req: OrdenReq):
             "sl": req.sl,
             "tp": req.tp,
             "cuenta": req.cuenta,
+            "be_on": req.be_on,
+            "be_trigger_pct": req.be_trigger_pct,
+            "be_offset_pct": req.be_offset_pct,
         }
         # B: chequeo de precio actual vs el plan (instantáneo, sin IA).
         advertencias, severidad = _chequeo_precio(orden, precio_actual(req.par), req.precio_analisis)

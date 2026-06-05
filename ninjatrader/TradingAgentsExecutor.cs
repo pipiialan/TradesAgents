@@ -34,6 +34,14 @@ namespace NinjaTrader.NinjaScript.Strategies
         [Display(Name = "Velas que vive la LIMIT", Order = 2, GroupName = "Parameters")]
         public int VelasVida { get; set; }
 
+        [NinjaScriptProperty]
+        [Display(Name = "BE trigger % (default)", Order = 3, GroupName = "Parameters")]
+        public double BeTriggerPct { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "BE mover a +% (default)", Order = 4, GroupName = "Parameters")]
+        public double BeOffsetPct { get; set; }
+
         private string lastOrderId = "";
         private DateTime lastCheck = DateTime.MinValue;
         private double startUnix;   // hora (epoch seg) en que la estrategia entro a realtime
@@ -54,6 +62,13 @@ namespace NinjaTrader.NinjaScript.Strategies
         private int ladderExpiraBar;
         private readonly List<Order> ladderEntries = new List<Order>();
 
+        // Breakeven (% del precio): cuando el precio se mueve +beTrigPct% a favor, mueve el
+        // SL a la entrada (precio promedio) +beOffPct%. On/off + % vienen en la orden (app).
+        private bool beActive, beDone, beOpened;
+        private string beDir = "";
+        private double beTrigPct, beOffPct;
+        private readonly List<string> beSignals = new List<string>();
+
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
@@ -66,6 +81,8 @@ namespace NinjaTrader.NinjaScript.Strategies
                 IsExitOnSessionCloseStrategy = false;
                 OrderFile                    = @"e:\Bots trading\RESURECCIONDEPAQUITA\TradesAgents\data\order_request.json";
                 VelasVida                    = 15;
+                BeTriggerPct                 = 1.0;   // % de movimiento a favor que activa el breakeven (default app)
+                BeOffsetPct                  = 0.3;   // mover el SL a entrada +este % (deja ganancia asegurada)
             }
             else if (State == State.Realtime)
             {
@@ -76,6 +93,9 @@ namespace NinjaTrader.NinjaScript.Strategies
         protected override void OnBarUpdate()
         {
             if (State != State.Realtime) return;
+
+            // 0) Breakeven: cada tick, si la ganancia alcanzó BreakevenR*riesgo, mover SL a la entrada.
+            GestionBreakeven();
 
             // 1) Vigencia de la entrada pendiente: si NO se lleno y la orden sigue Working
             //    cuando se acaba la vigencia, la cancelamos EXPLICITAMENTE (no se cancela sola
@@ -158,6 +178,9 @@ namespace NinjaTrader.NinjaScript.Strategies
                 double vigencia = GetNum(json, "vigencia_min", 0);
                 double sl = GetNum(json, "sl", 0);
                 double tp = GetNum(json, "tp", 0);
+                bool beOn = GetBool(json, "be_on");
+                double beTrig = GetNum(json, "be_trigger_pct", BeTriggerPct);
+                double beOff = GetNum(json, "be_offset_pct", BeOffsetPct);
                 lastOrderId = id;
 
                 if (accion == "FLAT")
@@ -170,6 +193,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                     pend = false;
                     entryOrder = null;
                     CancelLadder();
+                    beActive = false; beDone = false; beOpened = false; beSignals.Clear();
                     if (Position.MarketPosition == MarketPosition.Long) ExitLong();
                     else if (Position.MarketPosition == MarketPosition.Short) ExitShort();
                     ResetSalidas();
@@ -198,12 +222,14 @@ namespace NinjaTrader.NinjaScript.Strategies
                     ResetSalidas();
 
                     int totalQ = 0;
+                    var escSignals = new List<string>();
                     for (int i = 0; i < esc.Count; i++)
                     {
                         double precio = esc[i][0];
                         int q = (int)esc[i][1]; if (q < 1) q = 1;
                         totalQ += q;
                         string sig = (accion == "LONG" ? "TA_Long_" : "TA_Short_") + id + "_" + i;
+                        escSignals.Add(sig);
                         if (sl > 0) SetStopLoss(sig, CalculationMode.Price, sl, false);   // SL GLOBAL (mismo precio para todos)
                         double tpi = (i < tps.Count ? tps[i] : (tps.Count > 0 ? tps[tps.Count - 1] : 0));
                         if (tpi > 0) SetProfitTarget(sig, CalculationMode.Price, tpi);    // TP por escalon (scale-out)
@@ -213,6 +239,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                         ladderEntries.Add(o);
                     }
                     slTpArmado = (sl > 0 || tps.Count > 0);
+                    ArmarBreakeven(accion, escSignals, beOn, beTrig, beOff);
                     WriteStatus(id, "COLOCADA", accion + " ESCALERA " + esc.Count + " limits (" + totalQ
                         + " micros), SL global " + Num(sl) + " (vigencia " + velasVidaL + " min)");
                     return;
@@ -237,6 +264,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 
                     // Enviar la entrada UNA sola vez (con SL/TP armados antes).
                     Submit();
+                    ArmarBreakeven(accion, new List<string> { pSignal }, beOn, beTrig, beOff);
 
                     WriteStatus(id, "COLOCADA", accion + " " + qty + " " + tipo + " @ " + Num(entrada) + " (vigencia " + velasVida + " min, esperando llenado)");
                 }
@@ -252,6 +280,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                     else EnterShort(qty, pSignal);
                     pend = false;
                     entryOrder = null;
+                    ArmarBreakeven(accion, new List<string> { pSignal }, beOn, beTrig, beOff);
                     WriteStatus(id, "EJECUTADA", accion + " " + qty + " MARKET");
                 }
             }
@@ -366,6 +395,48 @@ namespace NinjaTrader.NinjaScript.Strategies
             return v.ToString(CultureInfo.InvariantCulture);
         }
 
+        // Arma el seguimiento de breakeven para la posicion recien colocada.
+        private void ArmarBreakeven(string dir, List<string> signals, bool on, double trigPct, double offPct)
+        {
+            beActive = (on && trigPct > 0 && signals.Count > 0);
+            beDir = dir; beTrigPct = trigPct; beOffPct = offPct;
+            beDone = false; beOpened = false;
+            beSignals.Clear(); beSignals.AddRange(signals);
+        }
+
+        // Cada tick: cuando la ganancia desde la entrada promedio alcanza BreakevenR*riesgo,
+        // mueve el SL de TODAS las salidas de la posicion a la entrada (+/- buffer). Una sola vez.
+        private void GestionBreakeven()
+        {
+            if (!beActive) return;
+            bool inPos = (beDir == "LONG" && Position.MarketPosition == MarketPosition.Long)
+                      || (beDir == "SHORT" && Position.MarketPosition == MarketPosition.Short);
+            if (inPos) beOpened = true;
+            else
+            {
+                // Si ya habia estado abierta y ahora esta flat -> se cerro: limpiar.
+                if (beOpened) { beActive = false; beDone = false; beOpened = false; beSignals.Clear(); }
+                return;
+            }
+            if (beDone || beTrigPct <= 0) return;
+
+            double avg = Position.AveragePrice;
+            if (avg <= 0) return;
+            double cur = Close[0];
+            double fav = (beDir == "LONG") ? (cur - avg) : (avg - cur);
+            double trigDist = avg * (beTrigPct / 100.0);     // +X% del precio = activa
+            if (fav >= trigDist)
+            {
+                double offDist = avg * (beOffPct / 100.0);   // mover SL a entrada +Y%
+                double objetivo = avg + (beDir == "LONG" ? offDist : -offDist);
+                foreach (string sig in beSignals)
+                    SetStopLoss(sig, CalculationMode.Price, objetivo, false);
+                beDone = true;
+                WriteStatus(ladderId != "" ? ladderId : pId, "BREAKEVEN",
+                    "SL a " + Num(objetivo) + " (+" + beOffPct + "% tras moverse +" + beTrigPct + "%)");
+            }
+        }
+
         // Cancela los escalones de la escalera que sigan vivos y limpia el estado.
         private void CancelLadder()
         {
@@ -423,6 +494,19 @@ namespace NinjaTrader.NinjaScript.Strategies
                     list.Add(v);
             }
             return list;
+        }
+
+        // Lee un booleano del JSON: "be_on": true -> true; ausente o false -> false.
+        private bool GetBool(string json, string key)
+        {
+            string pat = "\"" + key + "\"";
+            int i = json.IndexOf(pat);
+            if (i < 0) return false;
+            i = json.IndexOf(':', i + pat.Length);
+            if (i < 0) return false;
+            i++;
+            while (i < json.Length && (json[i] == ' ' || json[i] == '\t' || json[i] == '\n' || json[i] == '\r')) i++;
+            return i < json.Length && (json[i] == 't' || json[i] == 'T');
         }
 
         private string GetStr(string json, string key)

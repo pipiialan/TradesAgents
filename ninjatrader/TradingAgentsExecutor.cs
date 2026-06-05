@@ -69,6 +69,14 @@ namespace NinjaTrader.NinjaScript.Strategies
         private double beTrigPct, beOffPct;
         private readonly List<string> beSignals = new List<string>();
 
+        // Re-proteccion: persiste el SL/TP de la posicion abierta para re-ponerlos si la
+        // estrategia se REINICIA (recompila/reconecta) y NinjaTrader le cancela el bracket
+        // (SyncCancelOldLiveOrders). Asi una posicion nunca queda desnuda tras un reinicio.
+        private string posDir = "";
+        private double posSL, posTP;
+        private bool restorePending;
+        private double restoreUntil;   // ventana para reintentar re-proteger (la posicion puede tardar en sincronizar)
+
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
@@ -87,6 +95,7 @@ namespace NinjaTrader.NinjaScript.Strategies
             else if (State == State.Realtime)
             {
                 startUnix = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+                restorePending = true; restoreUntil = startUnix + 20;   // re-proteger si quedo posicion (reintenta ~20s)
             }
         }
 
@@ -94,7 +103,11 @@ namespace NinjaTrader.NinjaScript.Strategies
         {
             if (State != State.Realtime) return;
 
-            // 0) Breakeven: cada tick, si la ganancia alcanzó BreakevenR*riesgo, mover SL a la entrada.
+            // -1) Re-proteccion: si la estrategia se reinicio y quedo una posicion sin bracket
+            //     (NinjaTrader lo cancela al re-sincronizar), re-poner el SL/TP persistido.
+            if (restorePending) RestaurarProteccion();
+
+            // 0) Breakeven: cada tick, si el precio avanzó +trigger%, mover el SL a la entrada +offset%.
             GestionBreakeven();
 
             // 1) Vigencia de la entrada pendiente: si NO se lleno y la orden sigue Working
@@ -194,6 +207,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                     entryOrder = null;
                     CancelLadder();
                     beActive = false; beDone = false; beOpened = false; beSignals.Clear();
+                    posDir = ""; BorrarPosState();
                     if (Position.MarketPosition == MarketPosition.Long) ExitLong();
                     else if (Position.MarketPosition == MarketPosition.Short) ExitShort();
                     ResetSalidas();
@@ -240,6 +254,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                     }
                     slTpArmado = (sl > 0 || tps.Count > 0);
                     ArmarBreakeven(accion, escSignals, beOn, beTrig, beOff);
+                    posDir = accion; posSL = sl; posTP = (tps.Count > 0 ? tps[tps.Count - 1] : 0); GuardarPosState();
                     WriteStatus(id, "COLOCADA", accion + " ESCALERA " + esc.Count + " limits (" + totalQ
                         + " micros), SL global " + Num(sl) + " (vigencia " + velasVidaL + " min)");
                     return;
@@ -265,6 +280,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                     // Enviar la entrada UNA sola vez (con SL/TP armados antes).
                     Submit();
                     ArmarBreakeven(accion, new List<string> { pSignal }, beOn, beTrig, beOff);
+                    posDir = accion; posSL = sl; posTP = tp; GuardarPosState();
 
                     WriteStatus(id, "COLOCADA", accion + " " + qty + " " + tipo + " @ " + Num(entrada) + " (vigencia " + velasVida + " min, esperando llenado)");
                 }
@@ -281,6 +297,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                     pend = false;
                     entryOrder = null;
                     ArmarBreakeven(accion, new List<string> { pSignal }, beOn, beTrig, beOff);
+                    posDir = accion; posSL = sl; posTP = tp; GuardarPosState();
                     WriteStatus(id, "EJECUTADA", accion + " " + qty + " MARKET");
                 }
             }
@@ -388,6 +405,65 @@ namespace NinjaTrader.NinjaScript.Strategies
             catch { }
         }
 
+        // ── Re-proteccion de la posicion ante reinicios ──────────────────────────
+        private string PosStateFile()
+        {
+            return Path.Combine(Path.GetDirectoryName(OrderFile), "position_state.json");
+        }
+
+        // Persiste el SL/TP (+ config de BE) de la posicion abierta a disco.
+        private void GuardarPosState()
+        {
+            try
+            {
+                string s = "{\"dir\":\"" + posDir + "\",\"sl\":" + Num(posSL) + ",\"tp\":" + Num(posTP)
+                    + ",\"be_on\":" + (beActive ? "true" : "false") + ",\"be_trigger_pct\":" + Num(beTrigPct)
+                    + ",\"be_offset_pct\":" + Num(beOffPct) + ",\"be_done\":" + (beDone ? "true" : "false") + "}";
+                File.WriteAllText(PosStateFile(), s);
+            }
+            catch { }
+        }
+
+        private void BorrarPosState()
+        {
+            try { string f = PosStateFile(); if (File.Exists(f)) File.Delete(f); }
+            catch { }
+        }
+
+        // Al (re)arrancar la estrategia: si quedo una posicion abierta sin bracket (porque el
+        // reinicio cancelo el SL/TP), re-poner el SL/TP persistido y re-armar el breakeven.
+        private void RestaurarProteccion()
+        {
+            try
+            {
+                string f = PosStateFile();
+                if (!File.Exists(f)) { restorePending = false; return; }
+                if (Position.MarketPosition == MarketPosition.Flat)
+                {
+                    // La posicion puede tardar en sincronizar tras el reinicio: reintentar en la ventana.
+                    double now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+                    if (now >= restoreUntil) { restorePending = false; BorrarPosState(); }
+                    return;
+                }
+                restorePending = false;
+                string j = File.ReadAllText(f);
+                posDir = GetStr(j, "dir");
+                posSL = GetNum(j, "sl", 0);
+                posTP = GetNum(j, "tp", 0);
+                if (posSL > 0) SetStopLoss(CalculationMode.Price, posSL);     // bracket GLOBAL sobre la posicion adoptada
+                if (posTP > 0) SetProfitTarget(CalculationMode.Price, posTP);
+                // Re-armar BE (via global, perdimos los signals) para que siga trailing.
+                beActive = GetBool(j, "be_on");
+                beDir = posDir;
+                beTrigPct = GetNum(j, "be_trigger_pct", BeTriggerPct);
+                beOffPct = GetNum(j, "be_offset_pct", BeOffsetPct);
+                beDone = GetBool(j, "be_done");
+                beOpened = true; beSignals.Clear();
+                WriteStatus("restore", "REPROTEGIDA", "posicion re-protegida tras reinicio: SL " + Num(posSL) + " TP " + Num(posTP));
+            }
+            catch (Exception ex) { Print("RestaurarProteccion error: " + ex.Message); }
+        }
+
         // Formatea numeros SIEMPRE con punto decimal (InvariantCulture) para no romper el
         // JSON del lado app en culturas con coma decimal (es-ES/es-MX).
         private string Num(double v)
@@ -415,7 +491,7 @@ namespace NinjaTrader.NinjaScript.Strategies
             else
             {
                 // Si ya habia estado abierta y ahora esta flat -> se cerro: limpiar.
-                if (beOpened) { beActive = false; beDone = false; beOpened = false; beSignals.Clear(); }
+                if (beOpened) { beActive = false; beDone = false; beOpened = false; beSignals.Clear(); posDir = ""; BorrarPosState(); }
                 return;
             }
             if (beDone || beTrigPct <= 0) return;
@@ -429,9 +505,12 @@ namespace NinjaTrader.NinjaScript.Strategies
             {
                 double offDist = avg * (beOffPct / 100.0);   // mover SL a entrada +Y%
                 double objetivo = avg + (beDir == "LONG" ? offDist : -offDist);
-                foreach (string sig in beSignals)
-                    SetStopLoss(sig, CalculationMode.Price, objetivo, false);
+                if (beSignals.Count > 0)
+                    foreach (string sig in beSignals) SetStopLoss(sig, CalculationMode.Price, objetivo, false);
+                else
+                    SetStopLoss(CalculationMode.Price, objetivo);   // posicion restaurada (sin signals): via global
                 beDone = true;
+                posSL = objetivo; GuardarPosState();   // persistir el nuevo SL (BE) por si se reinicia
                 WriteStatus(ladderId != "" ? ladderId : pId, "BREAKEVEN",
                     "SL a " + Num(objetivo) + " (+" + beOffPct + "% tras moverse +" + beTrigPct + "%)");
             }

@@ -70,6 +70,7 @@
         <label>Tipo de trade</label>
         <select id="modo">
           <option value="scalping">Scalping</option>
+          <option value="scalping2">Scalping 2 (pro: Nasdaq / Oro)</option>
           <option value="intradia">Intradía</option>
         </select>
       </div>
@@ -200,6 +201,14 @@ function render(d) {
 
   let exec = '';
   if (dir === 'LONG' || dir === 'SHORT') {
+    const esLadder = (j.tipo_orden || '').toString().toUpperCase() === 'LADDER' && Array.isArray(j.escalones) && j.escalones.length;
+    const _tps = (j.tps && j.tps.length) ? j.tps : (j.tp != null ? [j.tp] : []);
+    const ladderHtml = esLadder ? `<div class="meta kv" style="border:1px solid #a371f7;border-radius:8px;padding:10px;margin-top:10px">
+        🪜 <b>Entrada ESCALONADA (ladder)</b> — ${j.escalones.length} órdenes LIMIT · SL global <b>${j.sl ?? '—'}</b><br>
+        Niveles: ${j.escalones.map(e => e.precio).join(' · ')}<br>
+        TPs (scale-out): ${_tps.join(' · ') || '—'}<br>
+        <span class="hint">La cantidad de micros se reparte entre los ${j.escalones.length} niveles (mín 1 c/u). En modo escalera se ignoran Tipo/Entrada/TP de arriba; el SL sí se puede editar.</span>
+      </div>` : '';
     exec = `<div class="exec">
       <div class="row">
         <div><label>Cuenta NinjaTrader</label>
@@ -218,9 +227,10 @@ function render(d) {
         <div><label>Stop Loss</label><input id="o_sl" type="number" step="any"></div>
         <div><label>Take Profit</label><input id="o_tp" type="number" step="any"></div>
       </div>
+      ${ladderHtml}
       <div class="meta kv" id="precLine" style="margin-top:10px">Precio actual: cargando… <span style="cursor:pointer;color:#58a6ff" onclick="updatePrecio()">↻</span></div>
       <button id="btnReval" style="background:#6e40c9" onclick="revalidarOrden()">🔄 Revalidar con el Jefe (con el precio actual)</button>
-      <button style="background:${dir === 'LONG' ? '#1f6feb' : '#da3633'}" onclick="ejecutarOrden()">⚡ Ejecutar ${dir} en NinjaTrader</button>
+      <button style="background:${dir === 'LONG' ? '#1f6feb' : '#da3633'}" onclick="ejecutarOrden()">${esLadder ? '🪜 Ejecutar ESCALERA' : '⚡ Ejecutar ' + dir} en NinjaTrader</button>
       <div class="hint">Podés editar entrada/SL/TP antes de ejecutar. Al ejecutar se verifica el precio actual y te pedirá confirmación.</div>
     </div>`;
   }
@@ -331,13 +341,22 @@ async function revalidarOrden() {
 }
 
 async function ejecutarOrden() {
+  const j = window._jefe || {};
   const dir = window._dir;
   const acct = document.getElementById('acct').value;
   const qty = parseInt(document.getElementById('qty').value || '1', 10);
   const tipo = document.getElementById('o_tipo').value;
   const num = (id) => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? null : v; };
   const vigRaw = parseInt(document.getElementById('o_vig').value || '', 10);
-  const base = {
+  const esLadder = (j.tipo_orden || '').toString().toUpperCase() === 'LADDER' && Array.isArray(j.escalones) && j.escalones.length;
+  const base = esLadder ? {
+    par: window._par, direccion: dir, qty, tipo: 'LADDER',
+    escalones: j.escalones,
+    tps: (j.tps && j.tps.length) ? j.tps : (j.tp != null ? [j.tp] : []),
+    sl: (num('o_sl') ?? j.sl),
+    vigencia_min: isNaN(vigRaw) ? null : vigRaw,
+    cuenta: acct, precio_analisis: window._precioAnalisis ?? null,
+  } : {
     par: window._par, direccion: dir, qty, tipo,
     entrada: (tipo === 'MARKET' ? null : num('o_entrada')),
     vigencia_min: isNaN(vigRaw) ? null : vigRaw,
@@ -360,7 +379,14 @@ async function ejecutarOrden() {
         const cab = res.severidad === 'alta' ? '🚨 ALERTA DE PRECIO:' : '⚠️ Aviso de precio:';
         advTxt = '\n\n' + cab + '\n- ' + adv.join('\n- ');
       }
-      const msg = `Confirmar envío a NinjaTrader ${aviso}:\n\n${dir} ${o.qty} ${window._par} · ${o.tipo}${o.entrada ? ' @ ' + o.entrada : ' (mercado)'}${o.vigencia_min ? ' · vigencia ' + o.vigencia_min + ' min' : ''}\nCuenta: ${o.cuenta}\nSL ${o.sl ?? '—'} / TP ${o.tp ?? '—'}${advTxt}`;
+      let plan;
+      if (o.tipo === 'LADDER') {
+        const niveles = (o.escalones || []).map(e => `${e.precio}×${e.qty}`).join(' · ');
+        plan = `${dir} ESCALERA ${o.qty} ${window._par} (${(o.escalones || []).length} limits)\nNiveles: ${niveles}\nSL global ${o.sl ?? '—'} · TPs ${(o.tps || []).join(' · ') || '—'}${o.vigencia_min ? ' · vigencia ' + o.vigencia_min + ' min' : ''}`;
+      } else {
+        plan = `${dir} ${o.qty} ${window._par} · ${o.tipo}${o.entrada ? ' @ ' + o.entrada : ' (mercado)'}${o.vigencia_min ? ' · vigencia ' + o.vigencia_min + ' min' : ''}\nSL ${o.sl ?? '—'} / TP ${o.tp ?? '—'}`;
+      }
+      const msg = `Confirmar envío a NinjaTrader ${aviso}:\n\n${plan}\nCuenta: ${o.cuenta}${advTxt}`;
       if (!confirm(msg)) return;
       // PASO 2: ahora sí, con confirmado=true -> el backend escribe la orden.
       res = await post({ ...base, confirmado: true });

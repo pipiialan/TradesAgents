@@ -34,11 +34,13 @@ class OrdenReq(BaseModel):
     par: str
     direccion: str            # LONG | SHORT | FLAT
     qty: int = 1
-    tipo: str = "MARKET"      # MARKET | LIMIT | STOP
+    tipo: str = "MARKET"      # MARKET | LIMIT | STOP | LADDER
     entrada: float | None = None   # precio para LIMIT/STOP (null = market)
     vigencia_min: int | None = None  # minutos que la LIMIT/STOP vive antes de cancelarse
     sl: float | None = None
     tp: float | None = None
+    tps: list | None = None        # LADDER: TPs escalonados (scale-out: un TP por escalón)
+    escalones: list | None = None  # LADDER: [{"precio":x,"pct":n}] niveles de la escalera
     cuenta: str = "Sim101"
     precio_analisis: float | None = None  # precio al momento del análisis (para chequear drift)
     confirmado: bool = False  # gate: sin esto NO se escribe la orden para NinjaTrader
@@ -178,22 +180,55 @@ async def ejecutar_ep(req: OrdenReq):
         return JSONResponse({"error": "dirección inválida"}, status_code=400)
 
     tipo = req.tipo.upper()
-    if tipo not in ("MARKET", "LIMIT", "STOP"):
+    if tipo not in ("MARKET", "LIMIT", "STOP", "LADDER"):
         tipo = "MARKET"
-    orden = {
-        "id": str(time.time()),
-        "accion": req.direccion.upper(),
-        "par": req.par,
-        "qty": max(1, req.qty),
-        "tipo": tipo,
-        "entrada": req.entrada,
-        "vigencia_min": req.vigencia_min,
-        "sl": req.sl,
-        "tp": req.tp,
-        "cuenta": req.cuenta,
-    }
-    # B: chequeo de precio actual vs el plan (instantáneo, sin IA).
-    advertencias, severidad = _chequeo_precio(orden, precio_actual(req.par), req.precio_analisis)
+
+    if tipo == "LADDER" and req.escalones:
+        # Escalera: reparte el TOTAL de micros entre los escalones (mín 1 c/u).
+        # Si no alcanza para todos, reduce el número de escalones.
+        n = len(req.escalones)
+        total = max(1, req.qty)
+        if total < n:
+            req.escalones = req.escalones[:total]
+            n = total
+        base_q, extra = (total // n), (total - (total // n) * n)
+        esc_out = []
+        for idx, e in enumerate(req.escalones):
+            try:
+                precio = float(e.get("precio"))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            esc_out.append({"precio": precio, "qty": max(1, base_q + (1 if idx < extra else 0))})
+        tps = [float(t) for t in (req.tps or []) if t] or ([float(req.tp)] if req.tp else [])
+        orden = {
+            "id": str(time.time()),
+            "accion": req.direccion.upper(),
+            "par": req.par,
+            "qty": total,
+            "tipo": "LADDER",
+            "escalones": esc_out,
+            "tps": tps,
+            "vigencia_min": req.vigencia_min,
+            "sl": req.sl,
+            "cuenta": req.cuenta,
+        }
+        advertencias = ["Orden ESCALONADA (ladder): revisa los niveles, el SL global y los TPs antes de confirmar."]
+        severidad = "media"
+    else:
+        orden = {
+            "id": str(time.time()),
+            "accion": req.direccion.upper(),
+            "par": req.par,
+            "qty": max(1, req.qty),
+            "tipo": tipo,
+            "entrada": req.entrada,
+            "vigencia_min": req.vigencia_min,
+            "sl": req.sl,
+            "tp": req.tp,
+            "cuenta": req.cuenta,
+        }
+        # B: chequeo de precio actual vs el plan (instantáneo, sin IA).
+        advertencias, severidad = _chequeo_precio(orden, precio_actual(req.par), req.precio_analisis)
 
     # GATE server-side: sin confirmado=True NO se escribe nada para NinjaTrader.
     # Asi un POST directo (curl, otro cliente) tampoco puede disparar la orden.

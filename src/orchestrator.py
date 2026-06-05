@@ -220,7 +220,12 @@ async def analizar(par: str, contexto: dict, fecha: str,
     par = par.upper()
     pool = pool_de(par)
     modo = contexto.get("modo", "scalping")
-    pool_dir = POOL_DIRS[pool] + ("-intradia" if modo == "intradia" else "")
+    if modo == "scalping2":
+        pool_dir = POOL_DIRS[pool] + "-scalping2"     # indices-scalping2 (Nasdaq) u oro-scalping2 (Gold)
+    elif modo == "intradia":
+        pool_dir = POOL_DIRS[pool] + "-intradia"
+    else:
+        pool_dir = POOL_DIRS[pool]
     traders = load_pool(BASE / pool_dir)
 
     mt, mj = models_for(provider) if provider else (MODEL_TEAM, MODEL_JEFE)
@@ -237,7 +242,8 @@ async def analizar(par: str, contexto: dict, fecha: str,
     veredictos = list(await asyncio.gather(*[_run_agent(t, prompt_t, mt, api_key, api_base) for t in traders]))
 
     # 7ª card: BOT SMC V2 (determinista, bit-perfect) sobre 30m/15m/1m del dato crudo.
-    if raw is not None:
+    # En "scalping2" NO entra: ese modo es el equipo limpio de los 6 agentes Nasdaq pro.
+    if raw is not None and modo != "scalping2":
         try:
             veredictos.append(await bot_smc_v2_card(raw, contexto, par, mt, api_key, api_base))
         except Exception as e:  # noqa: BLE001

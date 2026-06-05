@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Globalization;
 using System.ComponentModel.DataAnnotations;
+using System.Collections.Generic;
 using NinjaTrader.Cbi;
 using NinjaTrader.NinjaScript;
 #endregion
@@ -47,6 +48,12 @@ namespace NinjaTrader.NinjaScript.Strategies
         private string pSignal = "";     // signalName ESTABLE de la entrada/salidas para esta orden
         private bool slTpArmado;         // SL/TP ya armados para la entrada actual
 
+        // Estado de una ESCALERA (ladder): varias LIMIT con SL global + TPs scale-out.
+        private bool ladderPend;
+        private string ladderId = "";
+        private int ladderExpiraBar;
+        private readonly List<Order> ladderEntries = new List<Order>();
+
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
@@ -54,7 +61,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                 Name                         = "TradingAgentsExecutor";
                 Description                  = "Ejecuta ordenes de la app TradingAgents (MARKET inmediata, LIMIT/STOP viva hasta llenarse, SL/TP OCO garantizado).";
                 Calculate                    = Calculate.OnEachTick;
-                EntriesPerDirection          = 1;
+                EntriesPerDirection          = 8;   // soporta ESCALERAS (ladder) de hasta 8 niveles
                 EntryHandling                = EntryHandling.AllEntries;
                 IsExitOnSessionCloseStrategy = false;
                 OrderFile                    = @"e:\Bots trading\RESURECCIONDEPAQUITA\TradesAgents\data\order_request.json";
@@ -89,6 +96,20 @@ namespace NinjaTrader.NinjaScript.Strategies
                     ResetSalidas();
                     WriteStatus(pId, "EXPIRADA", "no se lleno la " + pTipo + " a tiempo (vigencia agotada)");
                 }
+            }
+
+            // 1b) Vigencia de la ESCALERA: cancela los escalones que NO se llenaron.
+            //     Los que SI se llenaron conservan su bracket SL/TP.
+            if (ladderPend && CurrentBar >= ladderExpiraBar)
+            {
+                bool any = false;
+                foreach (Order o in ladderEntries)
+                    if (o != null && (o.OrderState == OrderState.Working
+                                   || o.OrderState == OrderState.Accepted
+                                   || o.OrderState == OrderState.Submitted))
+                    { CancelOrder(o); any = true; }
+                ladderPend = false;
+                if (any) WriteStatus(ladderId, "EXPIRADA", "escalones no llenados cancelados (vigencia)");
             }
 
             // 2) Revisar si llego una orden nueva (cada ~2s).
@@ -141,17 +162,59 @@ namespace NinjaTrader.NinjaScript.Strategies
 
                 if (accion == "FLAT")
                 {
-                    // Cancelar cualquier entrada pendiente, cerrar posicion y limpiar plantillas.
+                    // Cancelar cualquier entrada pendiente (single + escalera), cerrar y limpiar.
                     if (entryOrder != null && (entryOrder.OrderState == OrderState.Working
                                             || entryOrder.OrderState == OrderState.Accepted
                                             || entryOrder.OrderState == OrderState.Submitted))
                         CancelOrder(entryOrder);
                     pend = false;
                     entryOrder = null;
+                    CancelLadder();
                     if (Position.MarketPosition == MarketPosition.Long) ExitLong();
                     else if (Position.MarketPosition == MarketPosition.Short) ExitShort();
                     ResetSalidas();
                     WriteStatus(id, "EJECUTADA", "FLAT");
+                    return;
+                }
+
+                if (tipo == "LADDER" && (accion == "LONG" || accion == "SHORT"))
+                {
+                    // ESCALERA: varias LIMIT escalonadas, SL global unico, TPs scale-out (uno por escalon).
+                    CancelLadder();
+                    if (pend && entryOrder != null && (entryOrder.OrderState == OrderState.Working
+                                                    || entryOrder.OrderState == OrderState.Accepted
+                                                    || entryOrder.OrderState == OrderState.Submitted))
+                        CancelOrder(entryOrder);
+                    pend = false; entryOrder = null;
+
+                    List<double[]> esc = GetEscalones(json);
+                    List<double> tps = GetTps(json);
+                    if (esc.Count == 0) { WriteStatus(id, "RECHAZADA", "escalera sin escalones validos"); return; }
+
+                    int velasVidaL = vigencia > 0 ? (int)vigencia : VelasVida;
+                    if (velasVidaL < 1) velasVidaL = 1;
+                    ladderId = id; ladderExpiraBar = CurrentBar + velasVidaL;
+                    ladderEntries.Clear(); ladderPend = true;
+                    ResetSalidas();
+
+                    int totalQ = 0;
+                    for (int i = 0; i < esc.Count; i++)
+                    {
+                        double precio = esc[i][0];
+                        int q = (int)esc[i][1]; if (q < 1) q = 1;
+                        totalQ += q;
+                        string sig = (accion == "LONG" ? "TA_Long_" : "TA_Short_") + id + "_" + i;
+                        if (sl > 0) SetStopLoss(sig, CalculationMode.Price, sl, false);   // SL GLOBAL (mismo precio para todos)
+                        double tpi = (i < tps.Count ? tps[i] : (tps.Count > 0 ? tps[tps.Count - 1] : 0));
+                        if (tpi > 0) SetProfitTarget(sig, CalculationMode.Price, tpi);    // TP por escalon (scale-out)
+                        Order o = (accion == "LONG")
+                            ? EnterLongLimit(0, true, q, precio, sig)
+                            : EnterShortLimit(0, true, q, precio, sig);
+                        ladderEntries.Add(o);
+                    }
+                    slTpArmado = (sl > 0 || tps.Count > 0);
+                    WriteStatus(id, "COLOCADA", accion + " ESCALERA " + esc.Count + " limits (" + totalQ
+                        + " micros), SL global " + Num(sl) + " (vigencia " + velasVidaL + " min)");
                     return;
                 }
 
@@ -301,6 +364,65 @@ namespace NinjaTrader.NinjaScript.Strategies
         private string Num(double v)
         {
             return v.ToString(CultureInfo.InvariantCulture);
+        }
+
+        // Cancela los escalones de la escalera que sigan vivos y limpia el estado.
+        private void CancelLadder()
+        {
+            foreach (Order o in ladderEntries)
+                if (o != null && (o.OrderState == OrderState.Working
+                               || o.OrderState == OrderState.Accepted
+                               || o.OrderState == OrderState.Submitted))
+                    CancelOrder(o);
+            ladderEntries.Clear();
+            ladderPend = false;
+        }
+
+        // Parsea "escalones":[{"precio":X,"qty":N},...] -> lista de [precio, qty].
+        private List<double[]> GetEscalones(string json)
+        {
+            var list = new List<double[]>();
+            int k = json.IndexOf("\"escalones\"");
+            if (k < 0) return list;
+            int ini = json.IndexOf('[', k);
+            if (ini < 0) return list;
+            int fin = json.IndexOf(']', ini);
+            if (fin < 0 || fin <= ini) return list;
+            string arr = json.Substring(ini + 1, fin - ini - 1);
+            int p = 0;
+            while (true)
+            {
+                int a = arr.IndexOf('{', p);
+                if (a < 0) break;
+                int b = arr.IndexOf('}', a);
+                if (b < 0) break;
+                string obj = arr.Substring(a, b - a + 1);
+                double precio = GetNum(obj, "precio", 0);
+                double q = GetNum(obj, "qty", 1);
+                if (precio > 0) list.Add(new double[] { precio, q });
+                p = b + 1;
+            }
+            return list;
+        }
+
+        // Parsea "tps":[a,b,c] -> lista de numeros (TPs scale-out).
+        private List<double> GetTps(string json)
+        {
+            var list = new List<double>();
+            int k = json.IndexOf("\"tps\"");
+            if (k < 0) return list;
+            int ini = json.IndexOf('[', k);
+            if (ini < 0) return list;
+            int fin = json.IndexOf(']', ini);
+            if (fin < 0 || fin <= ini) return list;
+            string arr = json.Substring(ini + 1, fin - ini - 1);
+            foreach (string part in arr.Split(','))
+            {
+                double v;
+                if (double.TryParse(part.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out v) && v > 0)
+                    list.Add(v);
+            }
+            return list;
         }
 
         private string GetStr(string json, string key)

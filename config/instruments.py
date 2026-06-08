@@ -58,6 +58,24 @@ INSTRUMENTS = {
         "valor_tick_micro": None,
         "sesion_preferida": "London/NY",
     },
+    # Cripto (CME): activo de riesgo, opera 24/7. Usa el pool 'indices' (las
+    # estrategias de swing son agnósticas al activo). Mejor en modo swing.
+    "BTC": {
+        "nombre": "Bitcoin futures (CME)",
+        "pool": "indices",
+        "correlacionados": ["MBT"],
+        "tick": 5.0,
+        "valor_tick_micro": 0.50,    # MBT
+        "sesion_preferida": "24/7",
+    },
+    "MBT": {
+        "nombre": "Micro Bitcoin (CME)",
+        "pool": "indices",
+        "correlacionados": ["BTC"],
+        "tick": 1.0,
+        "valor_tick_micro": 0.10,    # MBT: $0.10 por punto
+        "sesion_preferida": "24/7",
+    },
 }
 
 # Directorios de cada pool (relativos a la raíz del proyecto).

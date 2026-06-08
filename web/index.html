@@ -64,6 +64,8 @@
           <option value="ES">ES — Mini S&P 500</option>
           <option value="GC">GC — Oro (futuros)</option>
           <option value="XAUUSD">XAUUSD — Oro spot</option>
+          <option value="MBT">MBT — Micro Bitcoin (CME)</option>
+          <option value="BTC">BTC — Bitcoin (futuros CME)</option>
         </select>
       </div>
       <div>
@@ -72,6 +74,7 @@
           <option value="scalping">Scalping</option>
           <option value="scalping2">Scalping 2 (pro: Nasdaq / Oro)</option>
           <option value="intradia">Intradía</option>
+          <option value="swing">Swing (1D/4h/1h · días)</option>
         </select>
       </div>
     </div>
@@ -236,11 +239,17 @@ function render(d) {
       <div class="meta kv" id="precLine" style="margin-top:10px">Precio actual: cargando… <span style="cursor:pointer;color:#58a6ff" onclick="updatePrecio()">↻</span></div>
       <button id="btnReval" style="background:#6e40c9" onclick="revalidarOrden()">🔄 Revalidar con el Jefe (con el precio actual)</button>
       <button style="background:${dir === 'LONG' ? '#1f6feb' : '#da3633'}" onclick="ejecutarOrden()">${esLadder ? '🪜 Ejecutar ESCALERA' : '⚡ Ejecutar ' + dir} en NinjaTrader</button>
-      <div class="hint">Podés editar entrada/SL/TP antes de ejecutar. Al ejecutar se verifica el precio actual y te pedirá confirmación.</div>
+      <div class="hint">Puedes editar entrada/SL/TP antes de ejecutar. Al ejecutar se verifica el precio actual y te pedirá confirmación.</div>
     </div>`;
   }
 
-  let html = `<div class="panel"><div class="veredicto ${conv}">
+  const avisos = d.advertencias_datos || [];
+  const bannerAvisos = avisos.length ? `<div class="panel" style="border:1px solid #d29922;background:#2b2200">
+    <div style="color:#e3b341;font-weight:600;margin-bottom:6px">⚠️ Datos insuficientes para el modo «${window._modo || ''}»</div>
+    ${avisos.map(a => '<div class="meta kv" style="color:#f0d98c">• ' + a + '</div>').join('')}
+  </div>` : '';
+
+  let html = bannerAvisos + `<div class="panel"><div class="veredicto ${conv}">
     <h2>${conv}</h2>
     <div class="dir">${j.direccion || ''} ${(j.tipo_orden && j.tipo_orden !== 'null') ? '· ' + j.tipo_orden : ''} ${j.entrada ? '@ ' + j.entrada : (j.zona_entrada ? '· ' + j.zona_entrada : '')}</div>
     <div class="meta" style="margin-top:8px">SL: ${j.sl ?? '—'} · TP: ${j.tp ?? '—'} · R:R ${j.rr ?? '—'} · riesgo sugerido ${j.riesgo_sugerido_pct ?? '—'}%</div>

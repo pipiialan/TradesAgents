@@ -136,9 +136,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             sb.Append("\"5m\":{\"ultimas_barras\":");  AppendBars(sb, 1, 160); sb.Append("},");
             sb.Append("\"15m\":{\"ultimas_barras\":"); AppendBars(sb, 2, 200); sb.Append("},");
             sb.Append("\"30m\":{\"ultimas_barras\":"); AppendBars(sb, 5, 240); sb.Append("},");
-            sb.Append("\"1h\":{\"ultimas_barras\":");  AppendBars(sb, 3, 120); sb.Append("},");
-            sb.Append("\"4h\":{\"ultimas_barras\":");  AppendBars(sb, 6, 60);  sb.Append("},");
-            sb.Append("\"1d\":{\"ultimas_barras\":");  AppendBars(sb, 4, 35);  sb.Append("}");
+            sb.Append("\"1h\":{\"ultimas_barras\":");  AppendBars(sb, 3, 150); sb.Append("},");
+            sb.Append("\"4h\":{\"ultimas_barras\":");  AppendBars(sb, 6, 120); sb.Append("},");
+            sb.Append("\"1d\":{\"ultimas_barras\":");  AppendBars(sb, 4, 200); sb.Append("}");
             sb.Append("},");
 
             sb.Append("\"niveles_clave\":{");

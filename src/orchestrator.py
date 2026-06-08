@@ -67,11 +67,21 @@ def _prompt_trader(par: str, contexto: dict, noticias: dict) -> str:
         f"SIEMPRE da tu MEJOR lectura con convicción alta/media/baja. Reserva NO-TRADE solo para cuando NO hay NINGÚN setup razonable; "
         f"si hay algo operable aunque no sea perfecto, dalo con confianza baja en vez de callarte. El horario nunca bloquea: solo modula tu confianza.\n"
     )
+    reg = (contexto or {}).get("regimen")
+    if modo == "swing":
+        linea_sesion = (
+            f"MODO SWING (holds ~1-5 días): operas en 1D (sesgo de fondo) / 4h (estructura) / 1h (ejecución y gatillo). "
+            f"La sesión intradía NO importa para tu decisión (el horario casi no afecta el swing). "
+            f"FILTRO DE RÉGIMEN común (MA200 diaria, estilo Paul Tudor Jones): {json.dumps(reg, ensure_ascii=False) if reg else 'sin datos suficientes para MA200'}. "
+            f"Prioriza ir a FAVOR del régimen; en contra exige una señal mucho más limpia y baja la confianza. "
+            f"Tu SL/TP y vigencia se miden en HORAS-DÍAS (no minutos): da 'vigencia_min' acorde (ej. 240-2880).\n"
+            f"SIEMPRE da tu mejor lectura con convicción alta/media/baja; NO-TRADE solo si de verdad no hay setup.\n"
+        )
     return (
         f"Par a analizar: {par} ({INSTRUMENTS[par]['nombre']}).\n"
         f"{linea_sesion}"
         f"Modo de operación: {modo} — ajusta tu enfoque de temporalidades a este estilo.\n"
-        f"Cada TF trae velas (oldest->newest) + indicadores calculados (ema9, ema20, adx, vwap).\n"
+        f"Cada TF trae velas (oldest->newest) + indicadores calculados (ema9, ema20, ema50, sma200, adx, vwap).\n"
         f"Contexto de mercado (multi-TF):\n{json.dumps(contexto, ensure_ascii=False, indent=2)}\n\n"
         f"Resumen de noticias del analista:\n{json.dumps(noticias, ensure_ascii=False, indent=2)}\n\n"
         "Si tu entrada es LIMIT o STOP, incluye 'vigencia_min' (minutos que tu setup sigue válido antes de cancelar; un scalp suele ser pocos minutos). "
@@ -79,14 +89,24 @@ def _prompt_trader(par: str, contexto: dict, noticias: dict) -> str:
     )
 
 
-def _prompt_jefe(par: str, veredictos: list[dict], noticias: dict) -> str:
+def _prompt_jefe(par: str, veredictos: list[dict], noticias: dict, con_bot: bool = True) -> str:
+    intro_bot = (
+        ("Agrega los veredictos de los 6 traders + el BOT SMC V2 (trader='smc-v2-bot') y el análisis de noticias.\n"
+         "Sobre 'smc-v2-bot': cuando DA SEÑAL (LONG/SHORT) con buen RR, trátala como una confirmación fuerte de su dirección "
+         "y puedes usar su entrada/SL/TP exactos (pesa un poco más que un trader normal, no más). PERO NO vetea ni domina: "
+         "si el bot dice NO-TRADE, IGNÓRALO por completo — no cuenta como voto, no baja la convicción del equipo. En ese caso "
+         "decide normal con el consenso de los 6 traders.\n")
+        if con_bot else
+        ("Agrega los veredictos de los 6 traders de SWING + el análisis de noticias (en este modo NO hay bot SMC V2).\n"
+         "Es swing intradía-días (holds ~1-5 días) en 1D (sesgo) / 4h (estructura) / 1h (ejecución). "
+         "Respeta el FILTRO DE RÉGIMEN MA200 diaria (estilo PTJ) que traen en el contexto: prioriza operaciones a favor del "
+         "régimen; en contra del régimen exige consenso más fuerte y reduce el riesgo. La vigencia de las órdenes es de HORAS-DÍAS, no minutos.\n")
+    )
     return (
-        f"Par: {par}. Agrega los veredictos de los 6 traders + el BOT SMC V2 (trader='smc-v2-bot') "
-        f"y el análisis de noticias.\n"
-        "Sobre 'smc-v2-bot': cuando DA SEÑAL (LONG/SHORT) con buen RR, trátala como una confirmación fuerte de su dirección "
-        "y puedes usar su entrada/SL/TP exactos (pesa un poco más que un trader normal, no más). PERO NO vetea ni domina: "
-        "si el bot dice NO-TRADE, IGNÓRALO por completo — no cuenta como voto, no baja la convicción del equipo. En ese caso "
-        "decide normal con el consenso de los 6 traders.\n\n"
+        f"Par: {par}. {intro_bot}"
+        "Sobre NOTICIAS: si el analista tiene confianza baja (<=3) o no tiene feed/datos en vivo, trátalo como NEUTRAL — NO degrades ni "
+        "marques SIN-SETUP por ventanas especulativas. NUNCA des SIN-SETUP si hay mayoría clara (4+ traders del mismo lado): da la "
+        "operación con la convicción que corresponda. Solo ESPERAR si hay un evento de noticias CONFIRMADO activo AHORA.\n\n"
         f"Veredictos:\n{json.dumps(veredictos, ensure_ascii=False, indent=2)}\n\n"
         f"Noticias:\n{json.dumps(noticias, ensure_ascii=False, indent=2)}\n\n"
         "Aplica tus reglas de consenso y filtro de noticias. Devuelve solo tu JSON final."
@@ -224,6 +244,8 @@ async def analizar(par: str, contexto: dict, fecha: str,
         pool_dir = POOL_DIRS[pool] + "-scalping2"     # indices-scalping2 (Nasdaq) u oro-scalping2 (Gold)
     elif modo == "intradia":
         pool_dir = POOL_DIRS[pool] + "-intradia"
+    elif modo == "swing":
+        pool_dir = POOL_DIRS[pool] + "-swing"         # indices-swing u oro-swing (1D/4h/1h, holds días)
     else:
         pool_dir = POOL_DIRS[pool]
     traders = load_pool(BASE / pool_dir)
@@ -242,8 +264,10 @@ async def analizar(par: str, contexto: dict, fecha: str,
     veredictos = list(await asyncio.gather(*[_run_agent(t, prompt_t, mt, api_key, api_base) for t in traders]))
 
     # 7ª card: BOT SMC V2 (determinista, bit-perfect) sobre 30m/15m/1m del dato crudo.
-    # En "scalping2" NO entra: ese modo es el equipo limpio de los 6 agentes Nasdaq pro.
-    if raw is not None and modo != "scalping2":
+    # NO entra en "scalping2" (equipo Nasdaq pro limpio) ni en "swing" (el bot es
+    # intradía 30m/15m/1m; en swing los TF son 1D/4h/1h y no aplica).
+    con_bot = raw is not None and modo not in ("scalping2", "swing")
+    if con_bot:
         try:
             veredictos.append(await bot_smc_v2_card(raw, contexto, par, mt, api_key, api_base))
         except Exception as e:  # noqa: BLE001
@@ -251,7 +275,7 @@ async def analizar(par: str, contexto: dict, fecha: str,
                                "confianza": 0, "razon": f"error del bot: {e}"})
 
     jefe = load_persona(BASE / "agents" / "orchestrator" / "jefe-ia.md")
-    decision = await _run_agent(jefe, _prompt_jefe(par, veredictos, noticias), mj, api_key, api_base)
+    decision = await _run_agent(jefe, _prompt_jefe(par, veredictos, noticias, con_bot=con_bot), mj, api_key, api_base)
 
     return {
         "par": par,

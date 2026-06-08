@@ -13,6 +13,9 @@ from zoneinfo import ZoneInfo
 WINDOWS = {
     "scalping": {"1m": 100, "5m": 60,  "15m": 50,  "1h": 24,  "1d": 3},
     "intradia": {"5m": 150, "15m": 200, "30m": 230, "1h": 115, "4h": 58, "1d": 30},
+    # Swing intradía-días (holds ~1-5 días): 1D=sesgo, 4h=estructura, 1h=ejecución.
+    # 1D=200 para tener la MA200 (filtro de régimen estilo PTJ).
+    "swing":    {"1h": 150, "4h": 120, "1d": 200},
 }
 
 _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
@@ -62,6 +65,44 @@ def _ema(values: list[float], period: int):
     for v in values[period:]:
         ema = v * k + ema * (1 - k)
     return round(ema, 2)
+
+
+def _sma(values: list[float], period: int):
+    if len(values) < period:
+        return None
+    return round(sum(values[-period:]) / period, 2)
+
+
+def _regimen_ma200(bars_1d: list[dict]):
+    """Filtro de régimen estilo Paul Tudor Jones: precio vs MA200 diaria + pendiente.
+    'Nada bueno pasa debajo de la MA200'. Lo usan TODOS los agentes de swing como sesgo común."""
+    closes = [b["c"] for b in (bars_1d or [])]
+    ma200 = _sma(closes, 200)
+    if ma200 is None:
+        return None
+    ma50 = _sma(closes, 50)
+    precio = closes[-1]
+    # Pendiente: MA200 de ahora vs la de hace ~20 días.
+    prev = _sma(closes[:-20], 200) if len(closes) >= 220 else None
+    if prev is None:
+        pendiente = "plano"
+    elif ma200 > prev * 1.001:
+        pendiente = "alcista"
+    elif ma200 < prev * 0.999:
+        pendiente = "bajista"
+    else:
+        pendiente = "plano"
+    return {
+        "ma200_diaria": ma200,
+        "ma50_diaria": ma50,
+        "precio": round(precio, 2),
+        "posicion": "arriba" if precio >= ma200 else "abajo",
+        "pendiente_ma200": pendiente,
+        "dist_pct": round((precio - ma200) / ma200 * 100, 2),
+        "sesgo_regimen": ("alcista (favorece LONG)" if precio >= ma200
+                          else "bajista (favorece SHORT / reduce longs)"),
+        "nota": "Filtro PTJ: arriba de la MA200 = sesgo largo; abajo = sesgo corto / cautela en longs.",
+    }
 
 
 def _vwap(bars: list[dict]):
@@ -191,6 +232,30 @@ def _pivots(niv: dict):
     return {"floor": floor, "camarilla": cam}
 
 
+def chequear_datos(ctx: dict, modo: str) -> list[str]:
+    """Avisa si NO llegan suficientes velas para el modo elegido (faltó historia en el chart).
+    Evita que los agentes analicen con datos cortos en silencio (ej. swing sin MA200)."""
+    modo = modo if modo in WINDOWS else "scalping"
+    req = WINDOWS[modo]
+    tfs = ctx.get("timeframes") or {}
+    nombres = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+               "1h": "1h", "4h": "4h", "1d": "diarias"}
+    avisos = []
+    for tf, objetivo in req.items():
+        n = ((tfs.get(tf) or {}).get("n_velas")) or 0
+        if n < objetivo * 0.8:                       # tolerancia: avisa si llega <80% de lo pedido
+            avisos.append(
+                f"Faltan velas de {nombres.get(tf, tf)}: llegan {n} de ~{objetivo} que necesita el modo «{modo}». "
+                f"Sube 'Days to load' en el chart de NinjaTrader."
+            )
+    if modo == "swing" and not ctx.get("regimen"):   # MA200 diaria = filtro de régimen del swing
+        avisos.append(
+            "No se pudo calcular la MA200 diaria (faltan ~200 velas diarias): el swing operará SIN filtro de régimen. "
+            "Carga ~300+ días de historia en el chart."
+        )
+    return avisos
+
+
 def preparar_contexto(raw: dict, modo: str = "scalping") -> dict:
     """Recorta por modo y agrega indicadores calculados por TF."""
     modo = modo if modo in WINDOWS else "scalping"
@@ -210,6 +275,8 @@ def preparar_contexto(raw: dict, modo: str = "scalping") -> dict:
             "indicadores": {
                 "ema9": _ema(closes, 9),
                 "ema20": _ema(closes, 20),
+                "ema50": _ema(closes, 50),
+                "sma200": _sma(closes, 200),
                 "adx": _adx(bars, 14),
                 "vwap": _vwap(bars),
             },
@@ -217,6 +284,10 @@ def preparar_contexto(raw: dict, modo: str = "scalping") -> dict:
         }
     ctx["timeframes"] = nuevos
     ctx["sesion_ny"] = _sesion_ny()
+    # Filtro de régimen común (MA200 diaria, estilo PTJ) — clave para swing.
+    reg = _regimen_ma200(((tfs.get("1d") or {}).get("ultimas_barras")) or [])
+    if reg:
+        ctx["regimen"] = reg
     _enriquecer_order_flow(ctx, raw)
     piv = _pivots(raw.get("niveles_clave") or {})
     if piv:

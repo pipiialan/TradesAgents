@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from .orchestrator import analizar, revalidar
 from .market_data import get_context, precio_actual
-from .features import preparar_contexto
+from .features import preparar_contexto, chequear_datos
 from config.instruments import INSTRUMENTS
 
 BASE = Path(__file__).resolve().parents[1]
@@ -26,7 +26,7 @@ class AnalisisReq(BaseModel):
     api_key: str
     model_team: str = ""
     model_jefe: str = ""
-    modo: str = "scalping"        # scalping | intradia (define la ventana de velas)
+    modo: str = "scalping"        # scalping | scalping2 | intradia | swing (define la ventana de velas y el pool)
     forzar_noticias: bool = False
 
 
@@ -90,6 +90,7 @@ async def analizar_ep(req: AnalisisReq):
             forzar_noticias=req.forzar_noticias, raw=raw,
         )
         res["precio_analisis"] = contexto.get("precio_actual")  # para el chequeo de drift al ejecutar
+        res["advertencias_datos"] = chequear_datos(contexto, req.modo)  # avisa si faltó historia para el modo
         return JSONResponse(res)
     except Exception as e:  # noqa: BLE001
         msg = str(e)

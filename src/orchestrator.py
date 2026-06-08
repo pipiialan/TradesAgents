@@ -91,11 +91,12 @@ def _prompt_trader(par: str, contexto: dict, noticias: dict) -> str:
 
 def _prompt_jefe(par: str, veredictos: list[dict], noticias: dict, con_bot: bool = True) -> str:
     intro_bot = (
-        ("Agrega los veredictos de los 6 traders + el BOT SMC V2 (trader='smc-v2-bot') y el análisis de noticias.\n"
-         "Sobre 'smc-v2-bot': cuando DA SEÑAL (LONG/SHORT) con buen RR, trátala como una confirmación fuerte de su dirección "
-         "y puedes usar su entrada/SL/TP exactos (pesa un poco más que un trader normal, no más). PERO NO vetea ni domina: "
-         "si el bot dice NO-TRADE, IGNÓRALO por completo — no cuenta como voto, no baja la convicción del equipo. En ese caso "
-         "decide normal con el consenso de los 6 traders.\n")
+        ("Agrega los veredictos de los 7 participantes: 6 traders + el BOT SMC V2 (trader='smc-v2-bot') y el análisis de noticias.\n"
+         "El 'smc-v2-bot' cuenta EXACTAMENTE IGUAL que cualquier trader: MISMO peso, un voto más. Su LONG/SHORT/NO-TRADE pesa "
+         "como el de cualquiera — ni más ni menos. NO lo trates como confirmación especial ni lo ignores ni dejes que su narrativa "
+         "domine: es uno más del equipo. Si da señal, puedes usar sus niveles exactos igual que los de cualquier trader.\n"
+         "CUENTA LOS VOTOS de los 7 y decide por mayoría: si 4 o más coinciden en un lado, DA esa operación con la convicción que toque. "
+         "NUNCA devuelvas SIN-SETUP cuando hay mayoría clara (4+ de 7) en un lado.\n")
         if con_bot else
         ("Agrega los veredictos de los 6 traders de SWING + el análisis de noticias (en este modo NO hay bot SMC V2).\n"
          "Es swing intradía-días (holds ~1-5 días) en 1D (sesgo) / 4h (estructura) / 1h (ejecución). "
@@ -232,6 +233,73 @@ async def bot_smc_v2_card(raw: dict, contexto: dict, par: str,
             "confianza": out.get("confianza", 7), "razon": out.get("razon", sig["razon"])}
 
 
+def _votos(veredictos: list[dict]) -> dict:
+    """Cuenta votos de TODOS los participantes (los 6 traders + el bot, peso IGUAL)."""
+    up = lambda v: (v.get("veredicto") or "").upper()
+    return {
+        "long": sum(1 for v in veredictos if up(v) == "LONG"),
+        "short": sum(1 for v in veredictos if up(v) == "SHORT"),
+        "no_trade": sum(1 for v in veredictos if up(v) == "NO-TRADE"),
+    }
+
+
+def _mediana(xs: list):
+    xs = sorted(x for x in xs if x is not None)
+    if not xs:
+        return None
+    n = len(xs)
+    return xs[n // 2] if n % 2 else round((xs[n // 2 - 1] + xs[n // 2]) / 2, 2)
+
+
+def _red_seguridad_consenso(decision: dict, veredictos: list[dict], raw: dict | None, modo: str) -> dict:
+    """Si hay mayoría clara (4+ del mismo lado, contando el bot) pero el Jefe NO concretó
+    una operación (SIN-SETUP/ESPERAR, o su llamada falló), arma el plan por consenso de
+    forma determinista para NO quedarnos sin decisión. Si el Jefe ya operó, se respeta."""
+    if not isinstance(decision, dict):
+        decision = {}
+    votos = _votos(veredictos)
+    lado = "LONG" if votos["long"] >= votos["short"] else "SHORT"
+    n = votos[lado.lower()]
+    otro = votos["short" if lado == "LONG" else "long"]
+    if n < 4 or n <= otro:
+        return decision  # sin mayoría clara: respeta al Jefe
+
+    conv = (decision.get("convicción") or decision.get("conviccion") or "").upper()
+    dirj = (decision.get("direccion") or "").upper()
+    operable = dirj in ("LONG", "SHORT") and conv in ("ALTA", "MEDIA", "BAJA") and decision.get("entrada") is not None
+    if operable:
+        return decision  # el Jefe ya entregó una operación: no la tocamos
+
+    # El Jefe no concretó pese a la mayoría -> plan por consenso (mediana de los que coinciden).
+    coinciden = [v for v in veredictos if (v.get("veredicto") or "").upper() == lado]
+    entrada = _mediana([v.get("entrada") for v in coinciden])
+    sl = _mediana([v.get("sl") for v in coinciden])
+    tp = _mediana([v.get("tp") for v in coinciden])
+    precio = (raw or {}).get("precio_actual")
+    if entrada is None:
+        entrada = precio
+    tipo, _nota = _tipo_orden_bot(lado, entrada, precio) if entrada is not None else ("MARKET", "")
+    rr = round(abs(tp - entrada) / abs(entrada - sl), 2) if (entrada and sl and tp and abs(entrada - sl) > 0) else None
+    conv_new = "ALTA" if n >= 5 else "MEDIA"
+    vig = {"scalping": 10, "scalping2": 10, "intradia": 60, "swing": 720}.get(modo, 30)
+    decision = dict(decision)
+    decision.update({
+        "convicción": conv_new,
+        "direccion": lado,
+        "votos": votos,
+        "tipo_orden": tipo,
+        "entrada": entrada,
+        "sl": sl, "tp": tp, "rr": rr,
+        "vigencia_min": (vig if tipo in ("LIMIT", "STOP") else None),
+        "riesgo_sugerido_pct": (1.5 if n >= 5 else 0.75),
+        "_red_seguridad": True,
+        "resumen": (f"⚙️ Red de seguridad: {n}/7 coinciden en {lado} pero el Jefe no concretó; "
+                    f"la app armó el plan por consenso (mediana de entradas/SL/TP de los que coinciden). "
+                    + (decision.get("resumen") or "")),
+    })
+    return decision
+
+
 async def analizar(par: str, contexto: dict, fecha: str,
                    provider: str | None = None, api_key: str | None = None,
                    model_team: str | None = None, model_jefe: str | None = None,
@@ -276,6 +344,9 @@ async def analizar(par: str, contexto: dict, fecha: str,
 
     jefe = load_persona(BASE / "agents" / "orchestrator" / "jefe-ia.md")
     decision = await _run_agent(jefe, _prompt_jefe(par, veredictos, noticias, con_bot=con_bot), mj, api_key, api_base)
+    # Red de seguridad: con mayoría clara (4+ de 7) el equipo SIEMPRE entrega operación,
+    # aunque el Jefe se haya quedado sin decidir o su llamada haya fallado.
+    decision = _red_seguridad_consenso(decision, veredictos, raw, modo)
 
     return {
         "par": par,

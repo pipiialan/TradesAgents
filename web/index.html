@@ -388,9 +388,17 @@ async function ejecutarOrden() {
     // PASO 1: preview server-side (NO escribe la orden todavía) + chequeo de precio.
     let res = await post(base);
     if (res.error) { alert('Error: ' + res.error); return; }
+    if (res.bloqueado) {
+      alert('🛑 No se puede enviar esta orden:\n\n- ' + (res.advertencias || [res.error]).join('\n- ') + '\n\nAjusta el Tipo (o usa MARKET) y vuelve a intentar.');
+      return;
+    }
     if (res.requiere_confirmacion) {
       const o = res.orden || {};
       const adv = res.advertencias || [];
+      if (res.severidad === 'bloqueo') {
+        alert('🛑 No se puede enviar esta orden:\n\n- ' + adv.join('\n- ') + '\n\nAjusta el Tipo (o usa MARKET) y vuelve a intentar.');
+        return;
+      }
       let advTxt = '';
       if (adv.length) {
         const cab = res.severidad === 'alta' ? '🚨 ALERTA DE PRECIO:' : '⚠️ Aviso de precio:';

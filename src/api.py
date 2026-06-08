@@ -142,6 +142,38 @@ def _chequeo_precio(orden: dict, info: dict, precio_analisis):
 
     ref = entrada if (entrada and tipo in ("LIMIT", "STOP")) else precio_analisis
 
+    # COHERENCIA tipo de orden vs precio en vivo (evita el rechazo del broker).
+    # Buy Stop va ARRIBA del precio; Buy Limit ABAJO. (Sell al revés.)
+    if tipo in ("LIMIT", "STOP") and entrada:
+        tol = cur * 0.00005           # ~1-2 ticks: ignora cruces mínimos por redondeo
+        malo = None
+        if dir_ == "LONG":
+            if tipo == "STOP" and entrada < cur - tol:
+                malo = (f"STOP de compra @ {entrada} quedaría DEBAJO del precio actual ({cur}). "
+                        f"Un Buy Stop debe ir ARRIBA del precio: el broker la rechaza. "
+                        f"Usa LIMIT (comprar en retroceso) o MARKET (entrar ya).")
+            elif tipo == "LIMIT" and entrada > cur + tol:
+                malo = (f"LIMIT de compra @ {entrada} quedaría ARRIBA del precio actual ({cur}). "
+                        f"Un Buy Limit debe ir ABAJO del precio. "
+                        f"Usa STOP (comprar en ruptura) o MARKET (entrar ya).")
+        else:  # SHORT
+            if tipo == "STOP" and entrada > cur + tol:
+                malo = (f"STOP de venta @ {entrada} quedaría ARRIBA del precio actual ({cur}). "
+                        f"Un Sell Stop debe ir ABAJO del precio: el broker la rechaza. "
+                        f"Usa LIMIT (vender en rebote) o MARKET (entrar ya).")
+            elif tipo == "LIMIT" and entrada < cur - tol:
+                malo = (f"LIMIT de venta @ {entrada} quedaría DEBAJO del precio actual ({cur}). "
+                        f"Un Sell Limit debe ir ARRIBA del precio. "
+                        f"Usa STOP (vender en ruptura) o MARKET (entrar ya).")
+        if malo:
+            return ["🛑 ORDEN INVÁLIDA: " + malo] + adv, "bloqueo"
+        # Demasiado lejos del precio: posible rechazo por límites del producto (banding).
+        if abs(entrada - cur) > 0.02 * cur:
+            adv.append(f"La entrada ({entrada}) está MUY lejos del precio actual ({cur}): "
+                       f"el broker podría rechazarla por límites de precio.")
+            if sev == "ninguna":
+                sev = "media"
+
     if sl:
         cruzo_sl = (dir_ == "LONG" and cur <= sl) or (dir_ == "SHORT" and cur >= sl)
         if cruzo_sl:
@@ -239,6 +271,16 @@ async def ejecutar_ep(req: OrdenReq):
         }
         # B: chequeo de precio actual vs el plan (instantáneo, sin IA).
         advertencias, severidad = _chequeo_precio(orden, precio_actual(req.par), req.precio_analisis)
+
+    # GATE DURO: una orden inválida para el precio actual (lado equivocado) NUNCA se envía,
+    # ni siquiera con confirmado=True. El broker la rechazaría y detendría la estrategia.
+    if severidad == "bloqueo":
+        return JSONResponse({
+            "bloqueado": True,
+            "error": (advertencias[0] if advertencias else "Orden inválida para el precio actual."),
+            "advertencias": advertencias,
+            "orden": orden,
+        }, status_code=409)
 
     # GATE server-side: sin confirmado=True NO se escribe nada para NinjaTrader.
     # Asi un POST directo (curl, otro cliente) tampoco puede disparar la orden.

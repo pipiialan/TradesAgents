@@ -241,6 +241,20 @@ def chequear_datos(ctx: dict, modo: str) -> list[str]:
     nombres = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
                "1h": "1h", "4h": "4h", "1d": "diarias"}
     avisos = []
+
+    # 1) Fuente y frescura de los datos: si NinjaTrader está cerrado, el análisis
+    #    corre sobre datos viejos o de ejemplo. Esto va PRIMERO (lo más grave).
+    fuente = str(ctx.get("_fuente", ""))
+    edad = ctx.get("_edad_seg")
+    if fuente.startswith("STUB"):
+        avisos.append("🚨 NinjaTrader NO está enviando datos de este par: se está usando el EJEMPLO (precios falsos). "
+                      "NO operes — pon el indicador TradingAgentsExporter en un chart de ESTE par y vuelve a analizar.")
+    elif "DESACTUALIZADO" in fuente:
+        mins = round((edad or 0) / 60, 1)
+        avisos.append(f"🚨 Datos VIEJOS: el último dato de este par es de hace {mins} min "
+                      f"(NinjaTrader cerrado, mercado cerrado, o el indicador NO está en un chart de este par). "
+                      f"NO ejecutes con estos precios; re-analiza con datos en vivo.")
+
     for tf, objetivo in req.items():
         n = ((tfs.get(tf) or {}).get("n_velas")) or 0
         if n < objetivo * 0.8:                       # tolerancia: avisa si llega <80% de lo pedido

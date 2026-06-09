@@ -116,7 +116,16 @@ const MODEL_MAP = {
   gemini: ['gemini/gemini-2.5-flash', 'gemini/gemini-2.5-pro', 'gemini/gemini-2.0-flash', 'gemini/gemini-2.5-flash-lite'],
   groq: ['groq/llama-3.3-70b-versatile', 'groq/llama-3.1-8b-instant'],
   openai: ['gpt-4o-mini', 'gpt-4o'],
-  anthropic: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-8'],
+  // Opus 4.8 con sus niveles de razonamiento (effort). El sufijo ::nivel lo lee el backend.
+  anthropic: [
+    { value: 'claude-opus-4-8::max',    label: 'Opus 4.8 · max (mejor, más lento)' },
+    { value: 'claude-opus-4-8::xhigh',  label: 'Opus 4.8 · xhigh' },
+    { value: 'claude-opus-4-8::high',   label: 'Opus 4.8 · high' },
+    { value: 'claude-opus-4-8::medium', label: 'Opus 4.8 · medium' },
+    { value: 'claude-opus-4-8::low',    label: 'Opus 4.8 · low (más rápido)' },
+    'claude-sonnet-4-6',
+    'claude-haiku-4-5',
+  ],
   openrouter: ['openrouter/qwen/qwen-2.5-72b-instruct', 'openrouter/anthropic/claude-sonnet-4.5'],
 };
 
@@ -154,9 +163,11 @@ function poblarModelos() {
     sel.innerHTML = '';
     models.forEach(m => {
       const o = document.createElement('option');
-      o.value = m; o.textContent = m.split('/').pop();
+      if (typeof m === 'string') { o.value = m; o.textContent = m.split('/').pop(); }
+      else { o.value = m.value; o.textContent = m.label; }   // {value,label} = Opus con effort
       sel.appendChild(o);
     });
+    // Default: el primero (en anthropic = Opus 4.8 · max).
   });
   key.disabled = false;
   key.placeholder = 'pega aquí tu key';

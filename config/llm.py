@@ -37,18 +37,56 @@ def models_for(provider: str) -> tuple[str, str]:
     return p["team"], p["jefe"]
 
 
+# Opus 4.7/4.8 ELIMINARON temperature/top_p/top_k: enviarlos da 400 (invalid_request).
+_MODELOS_SIN_SAMPLING = ("claude-opus-4-7", "claude-opus-4-8")
+
+
+def _sin_sampling(model: str) -> bool:
+    """True si el modelo rechaza temperature (Opus 4.7/4.8). Entonces no se lo mandamos."""
+    return any(x in (model or "").lower() for x in _MODELOS_SIN_SAMPLING)
+
+
+# El usuario pidió effort 'max' SOLO para la API directa de Anthropic con Opus.
+# El CLI/puente usa modelos 'openai/claude-opus-*' (el effort va en el nombre) -> NO se toca.
+_EFFORT_MAX_OK = ("claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8")
+
+
+def _usa_effort_max(model: str) -> bool:
+    """True si es Opus por API directa (soporta effort incl. max). CLI ('openai/...') no."""
+    m = (model or "").lower()
+    if m.startswith("openai/"):           # CLI/puente: no aplica
+        return False
+    return any(x in m for x in _EFFORT_MAX_OK)
+
+
+def _split_effort(model: str) -> tuple[str, str | None]:
+    """'claude-opus-4-8::max' -> ('claude-opus-4-8', 'max'). Sin sufijo -> (model, None).
+    El dropdown de la API codifica el nivel de razonamiento así."""
+    if "::" in (model or ""):
+        base, eff = model.split("::", 1)
+        return base.strip(), eff.strip().lower()
+    return model, None
+
+
 async def complete(system: str, user: str, model: str,
                    api_key: str | None = None, api_base: str | None = None,
                    json_mode: bool = True) -> str:
     """Una llamada de chat. Si se pasa api_key, se usa esa (modo app); si no, LiteLLM usa la env var."""
+    model, effort = _split_effort(model)   # 'claude-opus-4-8::max' -> ('claude-opus-4-8', 'max')
     kwargs = {
         "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "temperature": 0.3,
     }
+    if not _sin_sampling(model):      # Opus 4.7/4.8 rechazan temperature (400)
+        kwargs["temperature"] = 0.3
+    # Effort (razonamiento): el que venga del dropdown; si no viene, default 'max' en Opus por API.
+    # SOLO API directa de Anthropic con Opus (el CLI maneja su effort por nombre de modelo). Sin thinking.
+    if _usa_effort_max(model):
+        nivel = effort or "max"
+        kwargs["extra_body"] = {"output_config": {"effort": nivel}}
     if api_key:
         kwargs["api_key"] = api_key
     # api_base sigue siendo opcional per-request; si no llega, sale del .env
@@ -63,6 +101,8 @@ async def complete(system: str, user: str, model: str,
         resp = await litellm.acompletion(**kwargs)
     except Exception:
         kwargs.pop("response_format", None)
+        kwargs.pop("temperature", None)        # algunos modelos (Opus 4.7/4.8) la rechazan
+        kwargs.pop("extra_body", None)         # degradación elegante si el effort no se acepta
         resp = await litellm.acompletion(**kwargs)
 
     return resp["choices"][0]["message"]["content"] or ""

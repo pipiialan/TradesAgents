@@ -37,8 +37,8 @@ def models_for(provider: str) -> tuple[str, str]:
     return p["team"], p["jefe"]
 
 
-# Opus 4.7/4.8 ELIMINARON temperature/top_p/top_k: enviarlos da 400 (invalid_request).
-_MODELOS_SIN_SAMPLING = ("claude-opus-4-7", "claude-opus-4-8")
+# Opus 4.7/4.8 y Fable 5 / Mythos 5 ELIMINARON temperature/top_p/top_k: enviarlos da 400.
+_MODELOS_SIN_SAMPLING = ("claude-opus-4-7", "claude-opus-4-8", "claude-fable-5", "claude-mythos-5")
 
 
 def _sin_sampling(model: str) -> bool:
@@ -46,13 +46,14 @@ def _sin_sampling(model: str) -> bool:
     return any(x in (model or "").lower() for x in _MODELOS_SIN_SAMPLING)
 
 
-# El usuario pidió effort 'max' SOLO para la API directa de Anthropic con Opus.
-# El CLI/puente usa modelos 'openai/claude-opus-*' (el effort va en el nombre) -> NO se toca.
-_EFFORT_MAX_OK = ("claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8")
+# Modelos de la API directa de Anthropic que soportan el parámetro effort (incl. max):
+# Opus 4.6/4.7/4.8 y Fable 5 / Mythos 5. El CLI/puente usa 'openai/...' (effort por nombre) -> NO se toca.
+_EFFORT_MAX_OK = ("claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8",
+                  "claude-fable-5", "claude-mythos-5")
 
 
 def _usa_effort_max(model: str) -> bool:
-    """True si es Opus por API directa (soporta effort incl. max). CLI ('openai/...') no."""
+    """True si es un modelo Anthropic por API directa que soporta effort. CLI ('openai/...') no."""
     m = (model or "").lower()
     if m.startswith("openai/"):           # CLI/puente: no aplica
         return False

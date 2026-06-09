@@ -116,13 +116,24 @@ const MODEL_MAP = {
   gemini: ['gemini/gemini-2.5-flash', 'gemini/gemini-2.5-pro', 'gemini/gemini-2.0-flash', 'gemini/gemini-2.5-flash-lite'],
   groq: ['groq/llama-3.3-70b-versatile', 'groq/llama-3.1-8b-instant'],
   openai: ['gpt-4o-mini', 'gpt-4o'],
-  // Opus 4.8 con sus niveles de razonamiento (effort). El sufijo ::nivel lo lee el backend.
+  // Fable 5 / Mythos 5 (nuevos 09-jun-2026) + Opus 4.8, con niveles de razonamiento (effort).
+  // Fable/Mythos llevan prefijo anthropic/ (LiteLLM aún no los conoce). El sufijo ::nivel lo lee el backend.
   anthropic: [
-    { value: 'claude-opus-4-8::max',    label: 'Opus 4.8 · max (mejor, más lento)' },
+    { value: 'anthropic/claude-fable-5::max',    label: 'Fable 5 · max (lo más nuevo/potente · $10/$50)' },
+    { value: 'anthropic/claude-fable-5::xhigh',  label: 'Fable 5 · xhigh' },
+    { value: 'anthropic/claude-fable-5::high',   label: 'Fable 5 · high' },
+    { value: 'anthropic/claude-fable-5::medium', label: 'Fable 5 · medium' },
+    { value: 'anthropic/claude-fable-5::low',    label: 'Fable 5 · low (más rápido)' },
+    { value: 'anthropic/claude-mythos-5::max',   label: 'Mythos 5 · max (solo Project Glasswing)' },
+    { value: 'anthropic/claude-mythos-5::xhigh', label: 'Mythos 5 · xhigh (solo Glasswing)' },
+    { value: 'anthropic/claude-mythos-5::high',  label: 'Mythos 5 · high (solo Glasswing)' },
+    { value: 'anthropic/claude-mythos-5::medium',label: 'Mythos 5 · medium (solo Glasswing)' },
+    { value: 'anthropic/claude-mythos-5::low',   label: 'Mythos 5 · low (solo Glasswing)' },
+    { value: 'claude-opus-4-8::max',    label: 'Opus 4.8 · max' },
     { value: 'claude-opus-4-8::xhigh',  label: 'Opus 4.8 · xhigh' },
     { value: 'claude-opus-4-8::high',   label: 'Opus 4.8 · high' },
     { value: 'claude-opus-4-8::medium', label: 'Opus 4.8 · medium' },
-    { value: 'claude-opus-4-8::low',    label: 'Opus 4.8 · low (más rápido)' },
+    { value: 'claude-opus-4-8::low',    label: 'Opus 4.8 · low' },
     'claude-sonnet-4-6',
     'claude-haiku-4-5',
   ],
@@ -157,6 +168,8 @@ function poblarModelos() {
   }
 
   const models = MODEL_MAP[prov] || [];
+  // Defaults por costo: traders en Opus 4.8 (más barato), Jefe en Fable 5 (lo mejor para la decisión final).
+  const DEFAULTS = { anthropic: { model_team: 'claude-opus-4-8::max', model_jefe: 'anthropic/claude-fable-5::max' } };
   ['model_team', 'model_jefe'].forEach(id => {
     const sel = document.getElementById(id);
     sel.disabled = false;
@@ -164,10 +177,11 @@ function poblarModelos() {
     models.forEach(m => {
       const o = document.createElement('option');
       if (typeof m === 'string') { o.value = m; o.textContent = m.split('/').pop(); }
-      else { o.value = m.value; o.textContent = m.label; }   // {value,label} = Opus con effort
+      else { o.value = m.value; o.textContent = m.label; }   // {value,label} = modelo con effort
       sel.appendChild(o);
     });
-    // Default: el primero (en anthropic = Opus 4.8 · max).
+    const def = DEFAULTS[prov] && DEFAULTS[prov][id];
+    if (def) sel.value = def;
   });
   key.disabled = false;
   key.placeholder = 'pega aquí tu key';

@@ -104,13 +104,18 @@
 
 <script>
 // Modelos del CLI de Claude (suscripción). El prefijo openai/ hace que LiteLLM
-// rutee al puente; éste mapea claude-haiku/sonnet/opus -> alias del CLI.
+// rutee al puente; el sufijo del nombre elige el effort. Fable 5 + Opus 4.8.
 const CLI_MODELS = [
-  { value: 'openai/claude-opus-low',    label: 'Opus 4.8 · low (más rápido)' },
-  { value: 'openai/claude-opus-medium', label: 'Opus 4.8 · medium' },
-  { value: 'openai/claude-opus-high',   label: 'Opus 4.8 · high' },
-  { value: 'openai/claude-opus-xhigh',  label: 'Opus 4.8 · xhigh' },
-  { value: 'openai/claude-opus-max',    label: 'Opus 4.8 · max (mejor, más lento)' },
+  { value: 'openai/claude-fable-low',    label: 'Fable 5 · low (más rápido)' },
+  { value: 'openai/claude-fable-medium', label: 'Fable 5 · medium' },
+  { value: 'openai/claude-fable-high',   label: 'Fable 5 · high' },
+  { value: 'openai/claude-fable-xhigh',  label: 'Fable 5 · xhigh' },
+  { value: 'openai/claude-fable-max',    label: 'Fable 5 · max (mejor, más lento)' },
+  { value: 'openai/claude-opus-low',     label: 'Opus 4.8 · low (más rápido)' },
+  { value: 'openai/claude-opus-medium',  label: 'Opus 4.8 · medium' },
+  { value: 'openai/claude-opus-high',    label: 'Opus 4.8 · high' },
+  { value: 'openai/claude-opus-xhigh',   label: 'Opus 4.8 · xhigh' },
+  { value: 'openai/claude-opus-max',     label: 'Opus 4.8 · max (mejor, más lento)' },
 ];
 const MODEL_MAP = {
   gemini: ['gemini/gemini-2.5-flash', 'gemini/gemini-2.5-pro', 'gemini/gemini-2.0-flash', 'gemini/gemini-2.5-flash-lite'],
@@ -147,7 +152,7 @@ function poblarModelos() {
   const getkey = document.getElementById('getkey');
 
   if (esCli) {
-    // Menús con Haiku/Sonnet/Opus 4.8. Default: traders Sonnet, Jefe Opus.
+    // Menús solo con Fable 5 (por nivel de effort). Default: traders medium, Jefe max.
     const fill = (id, def) => {
       const sel = document.getElementById(id);
       sel.disabled = false;
@@ -159,8 +164,8 @@ function poblarModelos() {
         sel.appendChild(o);
       });
     };
-    fill('model_team', 'openai/claude-opus-medium');
-    fill('model_jefe', 'openai/claude-opus-max');
+    fill('model_team', 'openai/claude-fable-medium');
+    fill('model_jefe', 'openai/claude-fable-max');
     key.disabled = true; key.value = '';
     key.placeholder = 'no necesaria — usa tu suscripción de Claude';
     getkey.textContent = 'Usa el CLI de Claude (suscripción). Puente corriendo: bridge/run_bridge.ps1';

@@ -57,16 +57,18 @@ def _resolve_claude_bin() -> str:
 
 CLAUDE_BIN = _resolve_claude_bin()
 
-# Mapeo de modelo OpenAI-style -> alias de modelo del CLI.
+# Mapeo de modelo OpenAI-style -> modelo del CLI. Ahora TODO corre en Fable 5;
+# el nivel de razonamiento se elige por sufijo de esfuerzo (-low/-medium/-high/
+# -xhigh/-max), que _resolve_model() separa antes de este lookup.
 # La app pedira "openai/claude-team" o "openai/claude-jefe" (ver PROVIDERS).
+FABLE = "claude-fable-5"
 MODEL_MAP = {
-    "claude-team": "haiku",
-    "claude-jefe": "sonnet",
-    "claude-haiku": "haiku",
-    "claude-sonnet": "sonnet",
-    "claude-opus": "opus",
+    "claude-team": FABLE,
+    "claude-jefe": FABLE,
+    "claude-fable": FABLE,
+    "claude-opus": "opus",   # Opus 4.8 SE QUEDA (solo se quitaron haiku/sonnet)
 }
-DEFAULT_MODEL = "sonnet"
+DEFAULT_MODEL = FABLE
 # Niveles de esfuerzo del CLI (--effort). Mas esfuerzo = mejor pero mas lento/cuota.
 EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 # Opus con esfuerzo alto/max puede tardar varios minutos por llamada -> timeout amplio.
@@ -136,7 +138,9 @@ async def _run_claude(system: str, user: str, model: str, effort: str | None, fo
         "--output-format", "json",
         "--model", model,
         "--tools", "",                 # sin herramientas -> 1 turno, sin web search
-        "--permission-mode", "plan",   # nunca puede escribir/ejecutar nada
+        # OJO: NO usar --permission-mode plan. Con Fable 5 el modo plan hace que el
+        # modelo escriba un plan + ExitPlanMode en vez de responder -> cards ERROR
+        # (JSON inválido). Con --tools "" ya no puede escribir/ejecutar nada.
         "--no-session-persistence",
     ]
     if effort:
@@ -211,9 +215,13 @@ async def chat_completions(req: ChatReq):
 @app.get("/v1/models")
 async def list_models():
     now = int(time.time())
+    # Fable 5 y Opus 4.8, una entrada por nivel de esfuerzo + la base de cada uno.
+    niveles = ("low", "medium", "high", "xhigh", "max")
+    ids = (["claude-fable"] + [f"claude-fable-{e}" for e in niveles]
+           + ["claude-opus"] + [f"claude-opus-{e}" for e in niveles])
     return {"object": "list", "data": [
         {"id": k, "object": "model", "created": now, "owned_by": "claude-code"}
-        for k in MODEL_MAP
+        for k in ids
     ]}
 
 
